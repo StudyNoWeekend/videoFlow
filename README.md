@@ -1,121 +1,73 @@
+<div align="center">
+
 # VideoFlow
 
-> 一个开箱即用的视频字幕生成与视频修复平台：扫描本地视频 → 调用 Whisper ASR 生成字幕 → 可选视频修复（Docker），全程任务化、可并发、可在线配置。
+### 给 Whisper + FFmpeg 装上 Web 可视化管理 —— 扫描视频目录，字幕自动生成，损坏视频一键修复。
 
-后端 Go（Gin + GORM + SQLite），前端 Vue 3 + Vite + Element Plus，外部依赖 FFmpeg、Whisper ASR Webservice。支持 Docker 一键部署。
+基于 Whisper ASR + FFmpeg + Docker 修复引擎，用 Vue 3 + Element Plus 打造的 Web 可视化管理界面。告别脚本拼装，扫描入库、创建任务、实时进度、在线配置，全部在浏览器里完成。后端 Go（Gin + GORM + SQLite），支持 Docker 一键部署。
 
----
+[![Stars](https://img.shields.io/github/stars/StudyNoWeekend/videoFlow?style=flat-square&logo=github&color=yellow)](https://github.com/StudyNoWeekend/videoFlow/stargazers)
+[![Forks](https://img.shields.io/github/forks/StudyNoWeekend/videoFlow?style=flat-square&logo=github&color=blue)](https://github.com/StudyNoWeekend/videoFlow/network/members)
+[![Issues](https://img.shields.io/github/issues/StudyNoWeekend/videoFlow?style=flat-square&logo=github)](https://github.com/StudyNoWeekend/videoFlow/issues)
+[![License](https://img.shields.io/github/license/StudyNoWeekend/videoFlow?style=flat-square&color=green)](./LICENSE)
+[![Go](https://img.shields.io/badge/Go-1.25-00ADD8?style=flat-square&logo=go&logoColor=white)](https://go.dev)
+[![Vue](https://img.shields.io/badge/Vue-3-4FC08D?style=flat-square&logo=vue.js&logoColor=white)](https://vuejs.org)
+[![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?style=flat-square&logo=docker&logoColor=white)](./Dockerfile)
 
-## 目录
+[💡 项目亮点](#-项目亮点) · [🎯 谁会想用](#-谁会想用) · [✨ 功能特性](#-功能特性) · [📥 快速开始](#-快速开始) · [🎬 使用流程](#-使用流程) · [🌐 技术栈](#-技术栈) · [🔧 配置](#-配置) · [📊 API 接口](#-api-接口) · [❓ FAQ](#-faq) · [🗺️ Roadmap](#️-roadmap)
 
-- [功能特性](#功能特性)
-- [技术栈](#技术栈)
-- [依赖说明](#依赖说明)
-- [快速开始](#快速开始)
-- [配置说明](#配置说明)
-- [API 接口](#api-接口)
-- [项目结构](#项目结构)
-- [开发指南](#开发指南)
-- [常见问题](#常见问题)
-- [贡献](#贡献)
-- [开源协议](#开源协议)
+🌐 **简体中文** · [繁體中文](./README.zh-TW.md) · [English](./README.en.md) · [日本語](./README.ja.md)
+
+</div>
 
 ---
 
-## 功能特性
+## 💡 项目亮点
 
-### 视频管理
-- 扫描本地视频目录入库（手动扫描 + 后台定时自动扫描）
-- 卡片式分页列表，展示名称、路径、时长、大小
-- 每个视频关联其字幕/修复任务及实时进度
-- 删除视频记录
+本项目最大的亮点是：**把 Whisper 语音识别、FFmpeg 音频处理、Docker 视频修复这三件本来要拼脚本才能串起来的事，整合成了一套开箱即用的 Web 可视化管理平台**。
 
-### 字幕生成
-- 基于 [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice) 语音识别
-- 通过 FFmpeg 提取音频后送入 ASR
-- 可配置项：语言、VAD 过滤、任务类型（transcribe / translate）、音频预编码、初始提示词、词级时间戳、输出格式（json / srt / vtt / txt / tsv）
-- 任务化异步执行，支持进度跟踪与失败重试
+单独用 Whisper / FFmpeg 并不难，但要把「扫描目录 -> 提取音频 -> 调 ASR -> 生成字幕 -> 任务并发 -> 进度跟踪 -> 失败重试 -> 在线改配置」串成完整流水线，命令行和脚本很难做得顺手。VideoFlow 在不改动底层引擎的前提下，给它套上了一层 Web UI：
 
-### 视频修复
-- 基于 Docker 镜像 [`ladaapp/lada`](https://hub.docker.com/r/ladaapp/lada) 修复损坏视频
-- 支持多种计算设备：CPU / NVIDIA CUDA / Apple Silicon MPS / Intel XPU
-- 任务化执行，与字幕任务共享调度器
+| 对比 | 手动拼装（Whisper + FFmpeg 脚本） | VideoFlow（本项目） |
+| --- | --- | --- |
+| 交互方式 | 命令行参数 + shell 脚本 | 浏览器图形界面，鼠标点点点 |
+| 字幕生成 | 手动提取音频、调 ASR、拼字幕文件 | 一键创建任务，自动 提取音频 -> ASR -> 生成字幕 |
+| 视频修复 | 手动跑 Docker 命令、盯终端 | 一键修复任务，支持 CPU / CUDA / MPS / XPU |
+| 任务管理 | 自己记，关掉终端就没了 | 任务列表 + 实时进度 + 失败重试 + 历史可查 |
+| 并发控制 | 自己写队列 / 信号量 | 调度器按配置并发数自动调度 |
+| 配置修改 | 改配置文件、重启服务 | 在线修改，保存即热生效，持久化到数据库 |
+| 部署形态 | 一堆依赖要装 | Docker 单镜像，挂载配置即跑 |
 
-### 任务管理
-- 统一任务列表，按类型（字幕 / 修复）过滤
-- 状态机：待处理（pending）→ 进行中（running）→ 已完成（completed）/ 失败（failed）
-- 实时进度条，前端 2 秒轮询刷新
-- 失败任务一键重试，历史任务删除
-- 后台任务调度器按配置的并发数限制执行
+底层复用 [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice) 的识别能力、[FFmpeg](https://ffmpeg.org/) 的音视频处理、[`ladaapp/lada`](https://hub.docker.com/r/ladaapp/lada) 的视频修复，在其之上封装出 HTTP API 与 Web 前端 —— **命令行的能力，图形界面的体验**。
 
-### 运行时配置
-- 统一配置页面，所有配置可在线修改并持久化（SQLite `settings` 表），保存即热生效
-- 覆盖：视频目录、扫描间隔、ASR 全套参数、修复镜像与设备、各任务并发数
+## 🎯 谁会想用
 
-### 工程特性
-- `trace_id` 全链路追踪（请求头 `X-Trace-ID` 透传）
-- 统一响应结构 `{ code, msg, data, trace_id }`
-- zap 结构化日志
-- 优雅关闭：服务重启时将运行中任务自动标记为失败，避免脏状态
-- 端口、配置、数据、日志均可通过环境变量 / 挂载文件在运行时指定
+| 你是 | 你能用它做什么 |
+| --- | --- |
+| **视频创作者 / 自媒体** | 批量给视频生成字幕，省去手动听写，导出 SRT / VTT 直接用 |
+| **字幕组 / 翻译爱好者** | 用 Whisper 批量转录生成时间轴，再人工校对，效率翻倍 |
+| **有损坏视频的人** | 视频打不开？用 lada Docker 一键修复，支持多种计算设备 |
+| **NAS / 家庭服务器玩家** | Docker 长期挂着，定时扫描目录自动入库，新视频自动生成字幕 |
+| **想本地跑 Whisper 的人** | 不想写脚本，Web 界面配置 ASR 参数（语言 / VAD / 提示词）即可 |
+| **嫌命令行麻烦的人** | 全程图形界面，配置、扫描、任务进度一目了然 |
+| **远程 ffmpeg 用户** | ffmpeg 支持 SSH 远程模式，本地不装 ffmpeg 也能用远程机器处理 |
+
+## ✨ 功能特性
+
+- **视频目录扫描** - 手动扫描或后台定时自动扫描，视频自动入库，卡片式分页展示
+- **字幕生成** - 基于 Whisper ASR，支持语言、VAD 过滤、任务类型、音频预编码、初始提示词、词级时间戳、多种输出格式（json / srt / vtt / txt / tsv）
+- **视频修复** - 基于 Docker 镜像 `ladaapp/lada`，支持 CPU / NVIDIA CUDA / Apple MPS / Intel XPU 四种计算设备
+- **任务管理** - 创建 / 查询 / 删除 / 失败重试，按类型过滤，实时进度条，前端 2 秒轮询刷新
+- **任务调度器** - 后台调度器按配置的并发数限制执行字幕 / 修复任务
+- **运行时配置** - 统一配置页，所有配置在线修改并持久化（SQLite），保存即热生效
+- **FFmpeg 双模式** - 本地直接调用，或通过 SSH 调用远程 ffmpeg，运行时可热切换
+- **工程化** - `trace_id` 全链路追踪、统一响应结构、zap 结构化日志、优雅关闭（重启时运行中任务自动标记失败）
 
 > 翻译功能（基于 Ollama）后端已实现，前端入口暂未启用，后续开放。
 
----
+## 📥 快速开始
 
-## 技术栈
-
-| 层 | 技术 |
-| --- | --- |
-| 后端 | Go 1.25、Gin、GORM、SQLite（mattn/go-sqlite3）、Viper、Zap |
-| 前端 | Vue 3、Vite、TypeScript、Element Plus、Pinia、Vue Router、Axios |
-| 外部服务 | FFmpeg / ffprobe、Whisper ASR Webservice、Docker（修复用，可选）、Ollama（翻译用，可选） |
-
----
-
-## 依赖说明
-
-### 运行时外部依赖
-
-| 依赖 | 用途 | 是否必需 |
-| --- | --- | --- |
-| **FFmpeg / ffprobe** | 提取音频、获取时长；`ffmpeg.provider=local` 时必需 | 必需（本地模式） |
-| **Whisper ASR Webservice** | 语音识别生成字幕 | 必需 |
-| **Docker** | 视频修复执行环境；不可用时仅告警，不阻塞启动 | 可选（仅修复功能） |
-| **Ollama** | 字幕翻译；前端入口暂未启用 | 可选 |
-
-> FFmpeg 也支持 `ssh` 远程模式：在配置中设置 `ffmpeg.provider=ssh` 并填写 SSH 主机信息，即可让后端通过 SSH 调用远程 ffmpeg，本地无需安装。
-
-### 后端 Go 依赖
-
-| 模块 | 版本 | 说明 |
-| --- | --- | --- |
-| github.com/gin-gonic/gin | v1.12.0 | HTTP 框架 |
-| gorm.io/gorm | v1.31.2 | ORM |
-| gorm.io/driver/sqlite | v1.6.0 | SQLite 驱动（基于 mattn/go-sqlite3 v1.14.22，需 CGO） |
-| github.com/spf13/viper | v1.21.0 | 配置管理（支持环境变量覆盖） |
-| go.uber.org/zap | v1.28.0 | 结构化日志 |
-| github.com/google/uuid | v1.6.0 | UUID 生成 |
-
-### 前端依赖
-
-| 包 | 版本 | 说明 |
-| --- | --- | --- |
-| vue | ^3.5.38 | 视图层 |
-| vue-router | ^5.1.0 | 路由 |
-| pinia | ^3.0.4 | 状态管理 |
-| element-plus | ^2.14.3 | UI 组件库 |
-| axios | ^1.18.1 | HTTP 客户端 |
-| vite | ^8.0.16 | 构建工具 |
-| typescript | ~6.0.0 | 类型系统 |
-
-> Node 版本要求：`^22.18.0 || >=24.12.0`（见 `frontend/package.json` 的 `engines`）。
-
----
-
-## 快速开始
-
-### 方式一：Docker（推荐）
+### 方式一：拉取镜像部署（推荐）
 
 镜像已发布到 GitHub Container Registry：
 
@@ -127,13 +79,14 @@ docker pull ghcr.io/studynoweekend/videoflow:latest
 
 ```bash
 cp backend/config/config.yaml.local config.yaml
-# 按需修改 config.yaml：asr.url、video.dir、http.port 等
+# 按需修改 config.yaml：asr.url、video.dir 等
 ```
 
 2. 启动容器（端口、配置、数据、日志均可在 `docker run` 时指定）：
 
 ```bash
 docker run -d --name videoflow \
+  --restart unless-stopped \
   -e APP_HTTP_PORT=8080 \
   -p 8080:8080 \
   -v "$PWD/config.yaml:/app/config/config.yaml:ro" \
@@ -159,24 +112,33 @@ docker run -d --name videoflow \
   ghcr.io/studynoweekend/videoflow:latest
 ```
 
-> 镜像为 `linux/amd64` 架构，在 Apple Silicon 上通过 QEMU 运行；部署到 amd64 服务器原生执行。
-> 若需启用视频修复，额外挂载宿主机 Docker socket：`-v /var/run/docker.sock:/var/run/docker.sock`。
-
-### 方式二：源码运行（开发）
-
-前置：本地已安装 Go 1.25+、Node.js 22.18+、FFmpeg，并已运行 Whisper ASR Webservice。
-
-**后端：**
+<details>
+<summary><b>方式二：本地构建镜像</b></summary>
 
 ```bash
+docker build -t video-captions:latest -f Dockerfile .
+docker run -d --name videoflow \
+  -e APP_HTTP_PORT=8080 -p 8080:8080 \
+  -v "$PWD/config.yaml:/app/config/config.yaml:ro" \
+  -v "$PWD/data:/app/data" \
+  video-captions:latest
+```
+
+Dockerfile 为多阶段构建：华为云 `golang:1.25-alpine` 编译（CGO）+ `alpine:3.20` 运行（内置 ffmpeg）。镜像为 `linux/amd64`，Apple Silicon 上通过 QEMU 运行。
+
+</details>
+
+### 方式三：本地开发部署
+
+**前置要求：** Go 1.25+、Node.js 22.18+、FFmpeg，并已运行 [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice)。
+
+```bash
+# 后端
 cd backend
 cp config/config.yaml.local config/config.yaml   # 按需修改
 go run ./cmd/api
-```
 
-**前端：**
-
-```bash
+# 前端（另开终端）
 cd frontend
 npm install
 npm run dev
@@ -185,58 +147,178 @@ npm run dev
 开发态前端通过 Vite 代理将 `/api` 转发到后端，端口由环境变量 `APP_HTTP_PORT` 统一控制（默认 8080，与后端共用）：
 
 ```bash
-APP_HTTP_PORT=9090 npm run dev   # 前端
+APP_HTTP_PORT=9090 npm run dev        # 前端
 APP_HTTP_PORT=9090 go run ./cmd/api   # 后端
 ```
 
 浏览器打开 Vite 提示的本地地址即可。
 
----
+## 🎬 使用流程
 
-## 配置说明
+1. 启动服务，浏览器访问前端地址
+2. 在「设置」页配置本地视频目录与 ASR 服务地址，保存
+3. 在「视频列表」页点击扫描，视频自动入库
+4. 点视频卡片上的「生成字幕」，创建字幕任务
+5. 在「任务管理」页查看实时进度（2 秒自动刷新）
+6. （可选）点「视频修复」修复损坏视频
+7. 字幕任务完成后，查看生成的字幕文件
 
-配置通过 `config.yaml` 加载，支持环境变量覆盖（viper，前缀 `APP_`，`.` → `_`，如 `http.port` → `APP_HTTP_PORT`）。运行时还可在前端「设置」页在线修改并持久化到数据库。
+## 🌐 技术栈
 
-| 配置项 | 说明 | 默认值 |
+| 层 | 技术 | 说明 |
 | --- | --- | --- |
-| `http.port` | 后端监听端口（可被 `APP_HTTP_PORT` 覆盖） | `8080` |
-| `video.dir` | 本地视频目录 | `""` |
-| `scan.interval` | 自动扫描间隔（秒） | `60` |
-| `asr.url` | Whisper ASR 服务地址 | `http://127.0.0.1:9999/asr` |
-| `asr.language` | 识别语言 | `zh` |
-| `asr.output` | 输出格式 txt/vtt/srt/tsv/json | `json` |
-| `repair.docker_image` | 修复用的 Docker 镜像 | `ladaapp/lada:latest` |
-| `repair.device` | 修复计算设备 cpu/cuda:0/mps/xpu:0 | `cpu` |
-| `concurrency.subtitle` | 字幕任务并发数 | `2` |
-| `concurrency.repair` | 修复任务并发数 | `1` |
-| `ffmpeg.provider` | FFmpeg 执行环境 local/ssh | `local` |
-| `database.dsn` | SQLite 数据库路径 | `data/app.db` |
+| Web 框架 | [Gin](https://github.com/gin-gonic/gin) | HTTP 路由与中间件 |
+| ORM | [GORM](https://github.com/go-gorm/gorm) | 数据持久化 |
+| 数据库 | SQLite（[mattn/go-sqlite3](https://github.com/mattn/go-sqlite3)） | CGO 驱动 |
+| 配置 | [Viper](https://github.com/spf13/viper) | 配置文件 + 环境变量覆盖 |
+| 日志 | [Zap](https://github.com/uber-go/zap) | 结构化日志 |
+| ASR | [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice) | 语音识别引擎 |
+| 音视频 | [FFmpeg](https://ffmpeg.org/) / ffprobe | 音频提取、时长探测，支持本地 / SSH |
+| 视频修复 | [`ladaapp/lada`](https://hub.docker.com/r/ladaapp/lada) | Docker 修复引擎 |
+| 前端 | Vue 3 + [Element Plus](https://element-plus.org/) + Vite | 图形界面 |
+| 状态管理 | [Pinia](https://pinia.vuejs.org/) | 前端状态 |
+| HTTP 客户端 | [Axios](https://axios-http.com/) | 接口请求 |
 
-完整字段见 [`backend/config/config.yaml.local`](backend/config/config.yaml.local)。
+## 🔧 配置
 
----
+配置优先级：**环境变量 > config.yaml > 代码默认值**。运行时还可在前端「设置」页在线修改并持久化到数据库。
 
-## API 接口
+<details>
+<summary><b>配置文件（config/config.yaml）</b></summary>
 
-所有接口统一前缀 `/api/v1`，响应结构 `{ code, msg, data, trace_id }`（`code=0` 表示成功）。
+```yaml
+app:
+  name: videoFlow
+  env: dev
+  port: 8080
+http:
+  port: 8080
+  read_timeout: 30
+  write_timeout: 30
+log:
+  level: info
+  path: logs
+database:
+  driver: sqlite
+  dsn: data/app.db
+video:
+  dir: ""
+scan:
+  interval: 60
+asr:
+  url: http://127.0.0.1:9999/asr
+  language: zh
+  vad_filter: false
+  task: transcribe
+  encode: true
+  initial_prompt: ""
+  word_timestamps: false
+  output: json
+repair:
+  docker_image: ladaapp/lada:latest
+  device: cpu            # cpu / cuda:0 / mps / xpu:0
+translation:
+  ollama_url: http://localhost:11434/api/generate
+  model: qwen3.5:0.8b
+concurrency:
+  subtitle: 2
+  repair: 1
+  translate: 1
+```
+
+</details>
+
+<details>
+<summary><b>环境变量（Docker 部署用）</b></summary>
+
+viper 前缀 `APP_`，配置键 `.` -> `_`，故 `http.port` 对应环境变量 `APP_HTTP_PORT`，依此类推：
+
+| 环境变量 | 配置项 | 默认值 |
+| --- | --- | --- |
+| `APP_HTTP_PORT` | `http.port` | `8080` |
+| `APP_VIDEO_DIR` | `video.dir` | `""` |
+| `APP_SCAN_INTERVAL` | `scan.interval` | `60` |
+| `APP_ASR_URL` | `asr.url` | `http://127.0.0.1:9999/asr` |
+| `APP_ASR_LANGUAGE` | `asr.language` | `zh` |
+| `APP_REPAIR_DEVICE` | `repair.device` | `cpu` |
+| `APP_DATABASE_DSN` | `database.dsn` | `data/app.db` |
+
+</details>
+
+<details>
+<summary><b>Docker 卷挂载点</b></summary>
+
+| 容器路径 | 用途 |
+| --- | --- |
+| `/app/config/config.yaml` | 配置文件（只读挂载） |
+| `/app/data` | SQLite 数据库持久化（`data/app.db`） |
+| `/app/logs` | 日志输出 |
+| `/var/run/docker.sock` | （可选）视频修复需要挂载宿主机 Docker socket |
+
+</details>
+
+## 📊 API 接口
+
+所有接口统一前缀 `/api/v1`，响应结构：
+
+```json
+{
+  "code": 0,
+  "msg": "success",
+  "data": {},
+  "trace_id": "xxx"
+}
+```
+
+`code=0` 表示成功，非 0 表示业务错误。
+
+<details>
+<summary><b>健康检查</b></summary>
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | `/health`、`/ready` | 健康检查 |
-| POST | `/api/v1/videos/scan` | 扫描视频目录入库 |
-| GET | `/api/v1/videos` | 分页查询视频列表 |
-| PUT | `/api/v1/videos/:id` | 更新视频信息 |
-| DELETE | `/api/v1/videos/:id` | 删除视频记录 |
-| POST | `/api/v1/tasks` | 创建任务（字幕 / 修复） |
-| GET | `/api/v1/tasks` | 分页查询任务列表（可按类型过滤） |
-| POST | `/api/v1/tasks/:id/retry` | 重试失败任务 |
-| DELETE | `/api/v1/tasks/:id` | 删除任务 |
-| GET | `/api/v1/settings` | 获取运行时配置 |
-| PUT | `/api/v1/settings` | 更新运行时配置 |
+| `GET` | `/health` | 健康检查 |
+| `GET` | `/ready` | 就绪检查 |
 
----
+</details>
 
-## 项目结构
+<details>
+<summary><b>视频接口</b></summary>
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `POST` | `/api/v1/videos/scan` | 扫描视频目录入库 |
+| `GET` | `/api/v1/videos` | 分页查询视频列表 |
+| `PUT` | `/api/v1/videos/:id` | 更新视频信息 |
+| `DELETE` | `/api/v1/videos/:id` | 删除视频记录 |
+
+</details>
+
+<details>
+<summary><b>任务接口</b></summary>
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `POST` | `/api/v1/tasks` | 创建任务（字幕 / 修复） |
+| `GET` | `/api/v1/tasks` | 分页查询任务列表（可按类型过滤） |
+| `POST` | `/api/v1/tasks/:id/retry` | 重试失败任务 |
+| `DELETE` | `/api/v1/tasks/:id` | 删除任务 |
+
+任务状态：`pending`（待处理）-> `running`（进行中）-> `completed`（已完成）/ `failed`（失败）
+
+</details>
+
+<details>
+<summary><b>运行时配置接口</b></summary>
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/v1/settings` | 获取运行时配置 |
+| `PUT` | `/api/v1/settings` | 更新运行时配置（保存即热生效） |
+
+</details>
+
+## 📁 项目结构
 
 ```
 videoFlow/
@@ -271,66 +353,86 @@ videoFlow/
 └── LICENSE
 ```
 
+## 🛡️ 注意事项
+
+- **FFmpeg 必需**：`ffmpeg.provider` 默认 `local`，镜像已内置 ffmpeg；本地源码运行需自行安装，或切换为 `ssh` 远程模式
+- **视频修复需 Docker**：容器部署时需挂载宿主机 Docker socket；不用该功能可忽略，不影响服务启动
+- **ASR 服务需自备**：请自行部署 [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice)，并配置 `asr.url`
+- **数据库持久化**：默认 `data/app.db`，Docker 部署时务必挂载 `/app/data` 目录，否则重启丢数据
+
+## ❓ FAQ
+
+<details>
+<summary><b>启动报 <code>ffmpeg not found</code> 怎么办？</b></summary>
+
+`ffmpeg.provider` 默认为 `local`，需要本地（或镜像内）存在 ffmpeg。Docker 镜像已内置；源码运行请安装 ffmpeg，或在配置中切换为 `ssh` 远程模式（填写 SSH 主机信息，后端通过 SSH 调用远程 ffmpeg）。
+
+</details>
+
+<details>
+<summary><b>视频修复功能不可用？</b></summary>
+
+修复依赖 Docker。容器部署时需挂载宿主机 Docker socket：`-v /var/run/docker.sock:/var/run/docker.sock`；不用该功能可忽略，不影响服务启动。
+
+</details>
+
+<details>
+<summary><b>如何更换后端端口？</b></summary>
+
+环境变量 `APP_HTTP_PORT` 覆盖 `http.port`（后端 viper 与前端 Vite 代理共用此变量）。`docker run -e APP_HTTP_PORT=9090 -p 9090:9090` 即可。
+
+</details>
+
+<details>
+<summary><b>数据库在哪？</b></summary>
+
+默认 `data/app.db`（SQLite）。Docker 部署时挂载 `/app/data` 目录以持久化。
+
+</details>
+
+<details>
+<summary><b>翻译功能什么时候开放？</b></summary>
+
+翻译（基于 Ollama）后端逻辑已实现，前端入口暂未启用，后续版本开放。可自行在 `frontend/src/views/VideosView.vue` 中解除注释启用。
+
+</details>
+
+## 🗺️ Roadmap
+
+- ✅ 视频扫描 + 字幕生成 + 视频修复
+- ✅ 任务管理 + 实时进度 + 失败重试
+- ✅ 运行时配置在线修改 + 持久化
+- ✅ Docker 部署 + 端口运行时指定
+- ✅ FFmpeg 本地 / SSH 双模式
+- 🔲 翻译功能前端入口开放
+- 🔲 字幕在线预览 / 编辑
+- 🔲 字幕文件导出下载
+- 🔲 多架构镜像（arm64 原生支持）
+
+## 💌 致谢
+
+本项目站在巨人的肩膀上，特别感谢以下开源项目及其作者：
+
+- **[Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice)** - by [@ahmetoner](https://github.com/ahmetoner)，基于 OpenAI Whisper 的 ASR HTTP 服务，VideoFlow 的语音识别能力全部基于此。
+- **[FFmpeg](https://ffmpeg.org/)** - 强大的音视频处理工具，负责音频提取与时长探测。
+- **[ladaapp/lada](https://hub.docker.com/r/ladaapp/lada)** - 视频修复 Docker 镜像。
+- **[Gin](https://github.com/gin-gonic/gin)** / **[GORM](https://github.com/go-gorm/gorm)** / **[Viper](https://github.com/spf13/viper)** / **[Zap](https://github.com/uber-go/zap)** - 优秀的 Go 基础库。
+- **[Vue 3](https://vuejs.org/)** / **[Element Plus](https://element-plus.org/)** / **[Vite](https://vite.dev/)** - 前端基石。
+
+## ⭐ Star history
+
+[![Stargazers over time](https://api.star-history.com/svg?repos=StudyNoWeekend/videoFlow&type=Date)](https://star-history.com/#StudyNoWeekend/videoFlow&Date)
+
+## 📜 协议
+
+[MIT License](./LICENSE) - 自由使用、修改、分发，只需保留版权声明。
+
 ---
 
-## 开发指南
+<div align="center">
 
-```bash
-# 前端类型检查
-cd frontend && npm run type-check
+**用过觉得有用？给个 ⭐ 是对作者最大的鼓励。**
 
-# 前端构建
-npm run build
+[⬆ 回到顶部](#videoflow) · [📥 快速开始](#-快速开始) · [💬 提 Issue](https://github.com/StudyNoWeekend/videoFlow/issues)
 
-# 后端编译（注意 CGO，因 sqlite 驱动）
-cd backend && CGO_ENABLED=1 go build -o bin/video-captions ./cmd/api
-
-# 前端代码规范
-cd frontend && npm run lint
-```
-
-### 构建镜像
-
-```bash
-docker build -t video-captions:latest -f Dockerfile .
-```
-
-Dockerfile 为多阶段构建：华为云 `golang:1.25-alpine` 编译（CGO）+ `alpine:3.20` 运行（内置 ffmpeg）。详见 [Dockerfile](Dockerfile)。
-
----
-
-## 常见问题
-
-**Q：启动报 `ffmpeg not found`？**
-A：`ffmpeg.provider` 默认为 `local`，需要本地（或镜像内）存在 ffmpeg。可安装 ffmpeg，或在配置中切换为 `ssh` 远程模式。
-
-**Q：视频修复功能不可用？**
-A：修复依赖 Docker。容器部署时需挂载宿主机 Docker socket；不用该功能可忽略，不影响服务启动。
-
-**Q：如何更换后端端口？**
-A：环境变量 `APP_HTTP_PORT` 覆盖 `http.port`（后端 viper 与前端 Vite 代理共用此变量）。
-
-**Q：数据库在哪？**
-A：默认 `data/app.db`（SQLite）。Docker 部署时挂载 `/app/data` 目录以持久化。
-
----
-
-## 贡献
-
-欢迎提 Issue 和 Pull Request。
-
-1. Fork 本仓库
-2. 新建分支：`git checkout -b feat/your-feature`
-3. 提交更改：`git commit -m "feat: ..."`
-4. 推送分支：`git push origin feat/your-feature`
-5. 发起 Pull Request
-
-请确保提交前通过 `npm run type-check` / `npm run lint` 与 `go build`。
-
----
-
-## 开源协议
-
-本项目基于 [MIT License](LICENSE) 开源。
-
-Copyright (c) 2026 StudyNoWeekend
+</div>
