@@ -63,11 +63,38 @@ Whisper や FFmpeg を単体で使うのは難しくありませんが、「デ�
 - **FFmpeg デュアルモード** - ローカルで直接呼び出し、または SSH 経由でリモート ffmpeg を呼び出し、実行時にホット切り替え可能
 - **エンジニアリング** - `trace_id` による全リンクトラッキング、統一レスポンス構造、zap による構造化ログ、グレースフルシャットダウン（再起動時に実行中タスクを自動的に失敗扱い）
 
-> 翻訳機能（Ollama ベース）はバックエンドが実装済みですが、フロントエンドの入り口はまだ有効化されておらず、今後公開予定です。
+> 翻訳機能（[Ollama](https://github.com/ollama/ollama) ベース）はバックエンドが実装済みですが、フロントエンドの入り口はまだ有効化されておらず、今後公開予定です。
 
 ## 📥 クイックスタート
 
-### 方法 1：イメージをプルしてデプロイ（推奨）
+### 方法 0：ワンクリックスクリプトデプロイ（最も推奨）
+
+本プロジェクトは [`install.sh`](./install.sh) ワンクリックインストールスクリプトを提供しており、以下のすべてのステップを自動的に完了します：
+
+- Docker 環境の検出
+- [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice) のデプロイ（CPU/GPU、エンジンとモデルの選択に対応）
+- [`ladaapp/lada`](https://hub.docker.com/r/ladaapp/lada) 動画修復イメージのプル
+- [FFmpeg](https://ffmpeg.org/) のインストール（macOS / Linux / Windows に対応）
+- 設定のガイドとプロジェクトコンテナの起動
+
+```bash
+bash install.sh
+```
+
+スクリプトはインタラクティブにガイドします。プロンプトに従って選択してください。完了後、各サービスのアクセス URL が出力されます。
+
+<details>
+<summary><b>スクリプトのオプション</b></summary>
+
+- **実行モード**：CPU モード（全プラットフォーム対応）/ GPU モード（Linux + NVIDIA GPU のみ）
+- **ASR エンジン**：`openai_whisper`（デフォルト）/ `faster_whisper` / `whisperx`
+- **字幕モデル**：`tiny` / `base` / `small` / `medium` / `large-v3` / `large-v3-turbo` および英語専用モデル
+- **モデルキャッシュの永続化**：後続の起動を高速化
+- **FFmpeg インストール**：パッケージマネージャを自動検出（Homebrew / apt / dnf / yum / pacman / apk / winget / choco）
+
+</details>
+
+### 方法 1：イメージをプルしてデプロイ
 
 イメージは GitHub Container Registry に公開されています：
 
@@ -175,7 +202,8 @@ APP_HTTP_PORT=9090 go run ./cmd/api   # 后端
 | ASR | [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice) | 音声認識エンジン |
 | 音声/動画 | [FFmpeg](https://ffmpeg.org/) / ffprobe | 音声抽出、再生時間の検出、ローカル / SSH に対応 |
 | 動画修復 | [`ladaapp/lada`](https://hub.docker.com/r/ladaapp/lada) | Docker 修復エンジン |
-| フロントエンド | Vue 3 + [Element Plus](https://element-plus.org/) + Vite | グラフィカル UI |
+| 翻訳 | [Ollama](https://github.com/ollama/ollama) | ローカル大模型推論（翻訳機能） |
+| フロントエンド | [Vue 3](https://vuejs.org/) + [Element Plus](https://element-plus.org/) + [Vite](https://vite.dev/) | グラフィカル UI |
 | 状態管理 | [Pinia](https://pinia.vuejs.org/) | フロントエンドの状態 |
 | HTTP クライアント | [Axios](https://axios-http.com/) | API リクエスト |
 
@@ -416,6 +444,7 @@ videoFlow/
 - **[Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice)** - by [@ahmetoner](https://github.com/ahmetoner)、OpenAI Whisper ベースの ASR HTTP サービス。VideoFlow の音声認識能力はすべてこれに基づいています。
 - **[FFmpeg](https://ffmpeg.org/)** - 強力な音声/動画処理ツール。音声の抽出と再生時間の検出を担います。
 - **[ladaapp/lada](https://hub.docker.com/r/ladaapp/lada)** - 動画修復 Docker イメージ。
+- **[Ollama](https://github.com/ollama/ollama)** - ローカル大模型推論エンジン、翻訳機能を支える基盤。
 - **[Gin](https://github.com/gin-gonic/gin)** / **[GORM](https://github.com/go-gorm/gorm)** / **[Viper](https://github.com/spf13/viper)** / **[Zap](https://github.com/uber-go/zap)** - 優秀な Go 基盤ライブラリ。
 - **[Vue 3](https://vuejs.org/)** / **[Element Plus](https://element-plus.org/)** / **[Vite](https://vite.dev/)** - フロントエンドの基盤。
 

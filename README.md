@@ -63,11 +63,38 @@
 - **FFmpeg 双模式** - 本地直接调用，或通过 SSH 调用远程 ffmpeg，运行时可热切换
 - **工程化** - `trace_id` 全链路追踪、统一响应结构、zap 结构化日志、优雅关闭（重启时运行中任务自动标记失败）
 
-> 翻译功能（基于 Ollama）后端已实现，前端入口暂未启用，后续开放。
+> 翻译功能（基于 [Ollama](https://github.com/ollama/ollama)）后端已实现，前端入口暂未启用，后续开放。
 
 ## 📥 快速开始
 
-### 方式一：拉取镜像部署（推荐）
+### 方式零：一键脚本部署（最推荐）
+
+项目提供 [`install.sh`](./install.sh) 一键安装脚本，自动完成以下全部步骤：
+
+- 检测 Docker 环境
+- 部署 [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice)（支持 CPU/GPU、引擎与模型选择）
+- 拉取 [`ladaapp/lada`](https://hub.docker.com/r/ladaapp/lada) 视频修复镜像
+- 安装 [FFmpeg](https://ffmpeg.org/)（支持 macOS / Linux / Windows）
+- 引导配置并启动本项目容器
+
+```bash
+bash install.sh
+```
+
+脚本采用交互式引导，按提示选择即可。完成后会输出各服务的访问地址。
+
+<details>
+<summary><b>脚本支持的可选项</b></summary>
+
+- **运行模式**：CPU 模式（全平台通用）/ GPU 模式（仅 Linux + NVIDIA GPU）
+- **ASR 引擎**：`openai_whisper`（默认）/ `faster_whisper` / `whisperx`
+- **字幕模型**：`tiny` / `base` / `small` / `medium` / `large-v3` / `large-v3-turbo` 及英文专用模型
+- **模型缓存持久化**：加速后续启动
+- **FFmpeg 安装**：自动识别包管理器（Homebrew / apt / dnf / yum / pacman / apk / winget / choco）
+
+</details>
+
+### 方式一：拉取镜像部署
 
 镜像已发布到 GitHub Container Registry：
 
@@ -175,7 +202,8 @@ APP_HTTP_PORT=9090 go run ./cmd/api   # 后端
 | ASR | [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice) | 语音识别引擎 |
 | 音视频 | [FFmpeg](https://ffmpeg.org/) / ffprobe | 音频提取、时长探测，支持本地 / SSH |
 | 视频修复 | [`ladaapp/lada`](https://hub.docker.com/r/ladaapp/lada) | Docker 修复引擎 |
-| 前端 | Vue 3 + [Element Plus](https://element-plus.org/) + Vite | 图形界面 |
+| 翻译 | [Ollama](https://github.com/ollama/ollama) | 本地大模型推理（翻译功能） |
+| 前端 | [Vue 3](https://vuejs.org/) + [Element Plus](https://element-plus.org/) + [Vite](https://vite.dev/) | 图形界面 |
 | 状态管理 | [Pinia](https://pinia.vuejs.org/) | 前端状态 |
 | HTTP 客户端 | [Axios](https://axios-http.com/) | 接口请求 |
 
@@ -416,6 +444,7 @@ videoFlow/
 - **[Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice)** - by [@ahmetoner](https://github.com/ahmetoner)，基于 OpenAI Whisper 的 ASR HTTP 服务，VideoFlow 的语音识别能力全部基于此。
 - **[FFmpeg](https://ffmpeg.org/)** - 强大的音视频处理工具，负责音频提取与时长探测。
 - **[ladaapp/lada](https://hub.docker.com/r/ladaapp/lada)** - 视频修复 Docker 镜像。
+- **[Ollama](https://github.com/ollama/ollama)** - 本地大模型推理引擎，为翻译功能提供支持。
 - **[Gin](https://github.com/gin-gonic/gin)** / **[GORM](https://github.com/go-gorm/gorm)** / **[Viper](https://github.com/spf13/viper)** / **[Zap](https://github.com/uber-go/zap)** - 优秀的 Go 基础库。
 - **[Vue 3](https://vuejs.org/)** / **[Element Plus](https://element-plus.org/)** / **[Vite](https://vite.dev/)** - 前端基石。
 

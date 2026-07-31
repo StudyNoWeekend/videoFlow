@@ -63,11 +63,38 @@ Under the hood it reuses the recognition power of [Whisper ASR Webservice](https
 - **FFmpeg dual mode** - Call locally, or invoke a remote ffmpeg over SSH, hot-switchable at runtime
 - **Engineering** - `trace_id` end-to-end tracing, unified response structure, zap structured logging, graceful shutdown (running tasks auto-marked as failed on restart)
 
-> The translation feature (based on Ollama) is implemented on the backend, but the frontend entry point is not yet enabled—it will be opened up later.
+> The translation feature (based on [Ollama](https://github.com/ollama/ollama)) is implemented on the backend, but the frontend entry point is not yet enabled-it will be opened up later.
 
 ## 📥 Quick Start
 
-### Option 1: Pull the image (recommended)
+### Option 0: One-click script (highly recommended)
+
+The project provides an [`install.sh`](./install.sh) one-click installer that automatically completes all of the following:
+
+- Detects the Docker environment
+- Deploys [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice) (supports CPU/GPU, engine and model selection)
+- Pulls the [`ladaapp/lada`](https://hub.docker.com/r/ladaapp/lada) video repair image
+- Installs [FFmpeg](https://ffmpeg.org/) (supports macOS / Linux / Windows)
+- Guides you through config and starts the project container
+
+```bash
+bash install.sh
+```
+
+The script is interactive-just follow the prompts. Once finished, it prints the access URLs for all services.
+
+<details>
+<summary><b>Script options</b></summary>
+
+- **Run mode**: CPU mode (all platforms) / GPU mode (Linux + NVIDIA GPU only)
+- **ASR engine**: `openai_whisper` (default) / `faster_whisper` / `whisperx`
+- **Subtitle model**: `tiny` / `base` / `small` / `medium` / `large-v3` / `large-v3-turbo` and English-only models
+- **Model cache persistence**: speeds up subsequent starts
+- **FFmpeg installation**: auto-detects package manager (Homebrew / apt / dnf / yum / pacman / apk / winget / choco)
+
+</details>
+
+### Option 1: Pull the image
 
 The image is published on the GitHub Container Registry:
 
@@ -175,7 +202,8 @@ Open the local address Vite prints in your browser.
 | ASR | [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice) | Speech recognition engine |
 | Audio/Video | [FFmpeg](https://ffmpeg.org/) / ffprobe | Audio extraction, duration probing, local / SSH |
 | Video repair | [`ladaapp/lada`](https://hub.docker.com/r/ladaapp/lada) | Docker repair engine |
-| Frontend | Vue 3 + [Element Plus](https://element-plus.org/) + Vite | Graphical UI |
+| Translation | [Ollama](https://github.com/ollama/ollama) | Local LLM inference (translation feature) |
+| Frontend | [Vue 3](https://vuejs.org/) + [Element Plus](https://element-plus.org/) + [Vite](https://vite.dev/) | Graphical UI |
 | State management | [Pinia](https://pinia.vuejs.org/) | Frontend state |
 | HTTP client | [Axios](https://axios-http.com/) | API requests |
 
@@ -416,6 +444,7 @@ This project stands on the shoulders of giants. Special thanks to the following 
 - **[Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice)** - by [@ahmetoner](https://github.com/ahmetoner), an ASR HTTP service based on OpenAI Whisper. VideoFlow's speech recognition is built entirely on this.
 - **[FFmpeg](https://ffmpeg.org/)** - A powerful audio/video processing tool, responsible for audio extraction and duration probing.
 - **[ladaapp/lada](https://hub.docker.com/r/ladaapp/lada)** - The video repair Docker image.
+- **[Ollama](https://github.com/ollama/ollama)** - Local LLM inference engine, powering the translation feature.
 - **[Gin](https://github.com/gin-gonic/gin)** / **[GORM](https://github.com/go-gorm/gorm)** / **[Viper](https://github.com/spf13/viper)** / **[Zap](https://github.com/uber-go/zap)** - Excellent Go foundation libraries.
 - **[Vue 3](https://vuejs.org/)** / **[Element Plus](https://element-plus.org/)** / **[Vite](https://vite.dev/)** - The frontend foundation.
 
