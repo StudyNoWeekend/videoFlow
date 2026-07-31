@@ -223,16 +223,17 @@ func taskWithVideoToRes(item *model.TaskWithVideo) *res.TaskRes {
 	}
 
 	return &res.TaskRes{
-		ID:         item.ID,
-		VideoID:    item.VideoID,
-		TaskType:   item.TaskType,
-		Status:     item.Status,
-		Progress:   item.Progress,
-		Result:     result,
-		ErrorMsg:   item.ErrorMsg,
-		RetryCount: item.RetryCount,
-		CreatedAt:  item.CreatedAt,
-		UpdatedAt:  item.UpdatedAt,
-		Video:      videoRes,
+		ID:          item.ID,
+		VideoID:     item.VideoID,
+		TaskType:    item.TaskType,
+		Status:      item.Status,
+		Progress:    item.Progress,
+		ProgressMsg: item.ProgressMsg,
+		Result:      result,
+		ErrorMsg:    item.ErrorMsg,
+		RetryCount:  item.RetryCount,
+		CreatedAt:   item.CreatedAt,
+		UpdatedAt:   item.UpdatedAt,
+		Video:       videoRes,
 	}
 }

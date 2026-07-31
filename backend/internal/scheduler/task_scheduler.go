@@ -303,7 +303,7 @@ func (s *TaskScheduler) processSubtitleTask(ctx context.Context, task *model.Tas
 	}
 
 	// 更新进度：任务启动
-	s.updateProgress(ctx, task.ID, 10, "")
+	s.updateProgress(ctx, task.ID, 10, "任务已启动，正在准备")
 
 	// 1. 获取视频信息
 	video, err := model.VideoGetByID(ctx, task.VideoID)
@@ -315,7 +315,7 @@ func (s *TaskScheduler) processSubtitleTask(ctx context.Context, task *model.Tas
 		s.markFailed(ctx, task, fmt.Errorf("视频记录不存在"))
 		return
 	}
-	s.updateProgress(ctx, task.ID, 20, "")
+	s.updateProgress(ctx, task.ID, 20, "正在获取视频信息")
 
 	// 若视频时长为 0，尝试通过 ffmpeg 获取并更新
 	if video.Duration == 0 {
@@ -329,7 +329,7 @@ func (s *TaskScheduler) processSubtitleTask(ctx context.Context, task *model.Tas
 			}
 		}
 	}
-	s.updateProgress(ctx, task.ID, 30, "")
+	s.updateProgress(ctx, task.ID, 30, "正在获取视频时长")
 
 	// 2. 提取音频到临时目录
 	tempDir, err := os.MkdirTemp("", "videoFlow-audio-*")
@@ -344,7 +344,7 @@ func (s *TaskScheduler) processSubtitleTask(ctx context.Context, task *model.Tas
 		s.markFailed(ctx, task, fmt.Errorf("提取音频失败: %w", err))
 		return
 	}
-	s.updateProgress(ctx, task.ID, 60, "")
+	s.updateProgress(ctx, task.ID, 60, "音频提取完成，正在识别语音内容")
 
 	// 3. 调用 ASR 转录，设置 10 分钟超时
 	asrCtx, asrCancel := context.WithTimeout(ctx, 10*time.Minute)
@@ -354,7 +354,7 @@ func (s *TaskScheduler) processSubtitleTask(ctx context.Context, task *model.Tas
 		s.markFailed(ctx, task, fmt.Errorf("ASR 转录失败: %w", err))
 		return
 	}
-	s.updateProgress(ctx, task.ID, 90, "")
+	s.updateProgress(ctx, task.ID, 90, "语音识别完成，正在生成字幕文件")
 
 	// 4. 保存字幕结果到数据库
 	resultJSON, err := json.Marshal(segments)
@@ -384,11 +384,24 @@ func (s *TaskScheduler) processSubtitleTask(ctx context.Context, task *model.Tas
 		zap.String("srt_file", srtFilePath),
 	)
 
-	s.markCompleted(ctx, task.ID, string(resultJSON))
+	// 6. 将字幕烧录到视频中（硬字幕）
+	s.updateProgress(ctx, task.ID, 95, "正在将字幕写入视频")
+	subtitledPath := filepath.Join(videoDir, baseName+"_subtitled"+videoExt)
+	if err := ffmpeg.BurnSubtitles(ctx, video.Path, srtFilePath, subtitledPath); err != nil {
+		s.markFailed(ctx, task, fmt.Errorf("字幕写入视频失败: %w", err))
+		return
+	}
+	logger.Logger.Info("字幕已写入视频",
+		zap.String("task_id", task.ID),
+		zap.String("subtitled_video", subtitledPath),
+	)
+
+	s.markCompleted(ctx, task.ID, string(resultJSON), "字幕生成完成")
 	logger.Logger.Info("字幕任务执行完成",
 		zap.String("task_id", task.ID),
 		zap.String("audio_path", filepath.Base(audioPath)),
 		zap.String("srt_file", srtFilePath),
+		zap.String("subtitled_video", subtitledPath),
 	)
 }
 
@@ -400,7 +413,7 @@ func (s *TaskScheduler) processRepairTask(ctx context.Context, task *model.Task)
 	}
 
 	// 更新进度：任务启动
-	s.updateProgress(ctx, task.ID, 0, "")
+	s.updateProgress(ctx, task.ID, 0, "任务已启动，正在准备")
 
 	// 1. 获取视频信息
 	video, err := model.VideoGetByID(ctx, task.VideoID)
@@ -412,7 +425,7 @@ func (s *TaskScheduler) processRepairTask(ctx context.Context, task *model.Task)
 		s.markFailed(ctx, task, fmt.Errorf("视频记录不存在"))
 		return
 	}
-	s.updateProgress(ctx, task.ID, 50, "")
+	s.updateProgress(ctx, task.ID, 50, "正在获取视频信息，准备修复")
 
 	// 2. 调用修复执行器，通过回调实时更新进度
 	lastProgress := -1
@@ -445,7 +458,7 @@ func (s *TaskScheduler) processRepairTask(ctx context.Context, task *model.Task)
 		return
 	}
 
-	s.markCompleted(ctx, task.ID, output)
+	s.markCompleted(ctx, task.ID, output, "视频修复完成")
 	logger.Logger.Info("修复任务执行完成",
 		zap.String("task_id", task.ID),
 		zap.String("video_path", video.Path),
@@ -466,9 +479,9 @@ func (s *TaskScheduler) updateProgress(ctx context.Context, taskID string, progr
 }
 
 // markCompleted 在事务中将任务标记为完成
-func (s *TaskScheduler) markCompleted(ctx context.Context, taskID string, resultJSON string) {
+func (s *TaskScheduler) markCompleted(ctx context.Context, taskID string, resultJSON string, progressMsg string) {
 	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		return model.TaskUpdateResultTx(tx, taskID, resultJSON)
+		return model.TaskUpdateResultTx(tx, taskID, resultJSON, progressMsg)
 	}); err != nil {
 		logger.Logger.Error("标记任务完成失败",
 			zap.String("task_id", taskID),
@@ -585,11 +598,11 @@ func (s *TaskScheduler) processTranslateTask(ctx context.Context, task *model.Ta
 		s.markFailed(ctx, task, fmt.Errorf("保存翻译文件失败: %w", err))
 		return
 	}
-	s.updateProgress(ctx, task.ID, 90, "")
+	s.updateProgress(ctx, task.ID, 90, "翻译文件已保存")
 
 	// 8. 标记任务完成，将翻译文件路径保存到结果中
 	resultJSON := fmt.Sprintf(`{"translated_file": "%s"}`, translatedFilePath)
-	s.markCompleted(ctx, task.ID, resultJSON)
+	s.markCompleted(ctx, task.ID, resultJSON, "字幕翻译完成")
 	logger.Logger.Info("翻译任务执行完成",
 		zap.String("task_id", task.ID),
 		zap.String("video_id", task.VideoID),

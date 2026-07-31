@@ -378,3 +378,126 @@ func parseDuration(output string) (float64, error) {
 
 	return float64(hours)*3600 + float64(minutes)*60 + seconds, nil
 }
+
+// escapeSubtitlesPath 转义 ffmpeg subtitles 滤镜中的字幕文件路径。
+// ffmpeg 滤镜语法中用单引号包裹路径可屏蔽空格、冒号等特殊字符，
+// 仅需转义路径中的单引号（\'）。
+func escapeSubtitlesPath(path string) string {
+	escaped := strings.ReplaceAll(path, "'", "\\'")
+	return "'" + escaped + "'"
+}
+
+// BurnSubtitles 将 SRT 字幕烧录到视频中（硬字幕），生成带有内嵌字幕的新视频文件。
+// videoPath: 输入视频路径；srtPath: SRT 字幕文件路径；outputPath: 输出视频路径。
+// 本地模式下所有路径均为本地路径；SSH 模式下 videoPath 和 outputPath 为远程路径，
+// srtPath 为本地路径（函数内部会自动上传到远程临时文件）。
+func BurnSubtitles(ctx context.Context, videoPath, srtPath, outputPath string) error {
+	if err := ensureFFmpeg(ctx); err != nil {
+		return err
+	}
+
+	if isRemote() {
+		return burnSubtitlesRemote(ctx, videoPath, srtPath, outputPath)
+	}
+	return burnSubtitlesLocal(ctx, videoPath, srtPath, outputPath)
+}
+
+// burnSubtitlesLocal 在本机调用 ffmpeg 将字幕烧录到视频
+func burnSubtitlesLocal(ctx context.Context, videoPath, srtPath, outputPath string) error {
+	// 检查视频文件是否存在
+	if _, err := os.Stat(videoPath); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("%w: %s", enum.ErrVideoNotFound, videoPath)
+		}
+		return fmt.Errorf("%w: %v", enum.ErrVideoNotFound, err)
+	}
+
+	// 检查字幕文件是否存在
+	if _, err := os.Stat(srtPath); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("%w: 字幕文件不存在: %s", enum.ErrSubtitleBurn, srtPath)
+		}
+		return fmt.Errorf("%w: %v", enum.ErrSubtitleBurn, err)
+	}
+
+	// 确保输出目录存在
+	outputDir := filepath.Dir(outputPath)
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		return fmt.Errorf("%w: %v", enum.ErrCreateOutputDir, err)
+	}
+
+	filterArg := "subtitles=" + escapeSubtitlesPath(srtPath)
+	args := []string{
+		"-i", videoPath,
+		"-vf", filterArg,
+		"-c:v", "libx264",
+		"-crf", "23",
+		"-c:a", "copy",
+		"-y",
+		outputPath,
+	}
+
+	output, err := run(ctx, "ffmpeg", args...)
+	if err != nil {
+		return fmt.Errorf("%w: %v, output: %s", enum.ErrSubtitleBurn, err, string(output))
+	}
+	return nil
+}
+
+// burnSubtitlesRemote 通过 SSH 在远程主机上将字幕烧录到视频。
+// 由于字幕文件在本地，需要先上传到远程临时文件，再执行 ffmpeg，最后清理临时文件。
+func burnSubtitlesRemote(ctx context.Context, videoPath, srtPath, outputPath string) error {
+	e := currentEnv()
+
+	// 读取本地字幕文件内容
+	srtContent, err := os.ReadFile(srtPath)
+	if err != nil {
+		return fmt.Errorf("%w: 读取字幕文件失败: %v", enum.ErrSubtitleBurn, err)
+	}
+
+	// 上传字幕文件到远程临时路径
+	remoteSrtPath := fmt.Sprintf("/tmp/videoflow_subtitle_%d.srt", time.Now().Unix())
+	if err := uploadFileRemote(ctx, e, remoteSrtPath, srtContent); err != nil {
+		return fmt.Errorf("%w: %v", enum.ErrSubtitleBurn, err)
+	}
+	defer cleanupRemoteFile(ctx, e, remoteSrtPath)
+
+	// 在远程执行 ffmpeg 烧录字幕
+	filterArg := "subtitles=" + escapeSubtitlesPath(remoteSrtPath)
+	args := []string{
+		"-i", videoPath,
+		"-vf", filterArg,
+		"-c:v", "libx264",
+		"-crf", "23",
+		"-c:a", "copy",
+		"-y",
+		outputPath,
+	}
+
+	output, err := runSSH(ctx, e.remoteHost, e.sshBaseArgs, "ffmpeg", args...)
+	if err != nil {
+		return fmt.Errorf("%w: %v, output: %s", enum.ErrSubtitleBurn, err, string(output))
+	}
+	return nil
+}
+
+// uploadFileRemote 通过 SSH 将内容写入远程文件
+func uploadFileRemote(ctx context.Context, e hostEnv, remotePath string, content []byte) error {
+	remoteCmd := fmt.Sprintf("cat > '%s'", remotePath)
+	sshArgs := make([]string, 0, len(e.sshBaseArgs)+4)
+	sshArgs = append(sshArgs, e.sshBaseArgs...)
+	sshArgs = append(sshArgs, e.remoteHost, "sh", "-c", remoteCmd)
+
+	cmd := exec.CommandContext(ctx, "ssh", sshArgs...)
+	cmd.Stdin = bytes.NewReader(content)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("上传文件到远程失败: %v, output: %s", err, string(output))
+	}
+	return nil
+}
+
+// cleanupRemoteFile 删除远程临时文件，忽略错误
+func cleanupRemoteFile(ctx context.Context, e hostEnv, remotePath string) {
+	_, _ = runSSH(ctx, e.remoteHost, e.sshBaseArgs, "rm", "-f", remotePath)
+}

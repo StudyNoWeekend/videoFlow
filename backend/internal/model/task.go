@@ -195,14 +195,18 @@ func TaskUpdateStatusTx(tx *gorm.DB, id string, status string, progress int, pro
 }
 
 // TaskUpdateResultTx 在事务中将任务标记为完成并保存结果
-func TaskUpdateResultTx(tx *gorm.DB, id string, resultJSON string) error {
-	return tx.Model(&Task{}).Where("id = ?", id).Updates(map[string]interface{}{
+func TaskUpdateResultTx(tx *gorm.DB, id string, resultJSON string, progressMsg string) error {
+	updates := map[string]interface{}{
 		"status":      TaskStatusCompleted,
 		"progress":    100,
 		"result_json": resultJSON,
 		"error_msg":   "",
 		"updated_at":  time.Now().Unix(),
-	}).Error
+	}
+	if progressMsg != "" {
+		updates["progress_msg"] = progressMsg
+	}
+	return tx.Model(&Task{}).Where("id = ?", id).Updates(updates).Error
 }
 
 // TaskUpdateFailedTx 在事务中将任务标记为失败

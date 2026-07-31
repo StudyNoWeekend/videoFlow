@@ -209,9 +209,10 @@ function stopPolling(): void {
           <el-tag :type="statusType(row.status)">{{ statusText(row.status) }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="进度" width="220">
+      <el-table-column label="进度" min-width="220">
         <template #default="{ row }">
           <el-progress :percentage="row.progress" :status="row.status === 'failed' ? 'exception' : row.status === 'completed' ? 'success' : ''" />
+          <div v-if="row.progress_msg" class="progress-msg">{{ row.progress_msg }}</div>
         </template>
       </el-table-column>
       <el-table-column label="错误信息" min-width="180" show-overflow-tooltip>
@@ -265,5 +266,12 @@ function stopPolling(): void {
   margin-top: 16px;
   display: flex;
   justify-content: flex-end;
+}
+
+.progress-msg {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.4;
 }
 </style>

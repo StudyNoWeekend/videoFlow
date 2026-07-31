@@ -49,6 +49,7 @@ var (
 	ErrDurationParse   = NewBizError(10060004, "解析视频时长失败", 500)
 	ErrAudioExtract    = NewBizError(10060005, "音频提取失败", 500)
 	ErrCreateOutputDir = NewBizError(10060006, "创建输出目录失败", 500)
+	ErrSubtitleBurn    = NewBizError(10060007, "字幕写入视频失败", 500)
 
 	// 任务相关错误
 	ErrTaskNotFound            = NewBizError(10070001, "任务不存在", 404)

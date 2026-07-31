@@ -14,6 +14,7 @@ export interface Task {
   task_type: TaskType
   status: TaskStatus
   progress: number
+  progress_msg?: string
   result?: unknown
   error_msg?: string
   retry_count: number
