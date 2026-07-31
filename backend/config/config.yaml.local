@@ -1,0 +1,57 @@
+app:
+  name: videoFlow
+  env: dev
+  port: 8080
+
+http:
+  port: 8080
+  read_timeout: 30
+  write_timeout: 30
+
+log:
+  level: info
+  path: logs
+
+database:
+  driver: sqlite
+  dsn: data/app.db
+  max_open_conns: 10
+  max_idle_conns: 5
+  conn_max_lifetime: 3600
+
+# 统一运行时配置（可被 settings 表覆盖）
+video:
+  dir: ""
+
+scan:
+  interval: 60
+
+asr:
+  url: http://127.0.0.1:9999/asr
+  language: zh
+  vad_filter: false
+  task: transcribe
+  encode: true
+  initial_prompt: ""
+  word_timestamps: false
+  output: json
+
+repair:
+  docker_image: ladaapp/lada:latest
+  # 计算设备，支持四种：cpu / cuda:0 / mps / xpu:0
+  device: cpu
+
+translation:
+  ollama_url: http://localhost:11434/api/generate
+  model: qwen3.5:0.8b
+  prompt_template: |
+    你是一个专业的翻译家。请将下面每一行文本翻译成中文。
+    每行输入对应一行输出，不要合并或拆分行，不要输出序号或其他内容。
+    只输出翻译结果。
+
+    {content}
+
+concurrency:
+  subtitle: 2
+  repair: 1
+  translate: 1

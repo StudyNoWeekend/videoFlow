@@ -1,0 +1,30 @@
+# Go
+backend/bin/
+backend/data/
+backend/logs/
+backend/config/config.yaml
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Node
+frontend/node_modules/
+frontend/dist/
+frontend/.vscode/
+frontend/*.log
+
+# IDE
+.idea/
+.trae/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+dist/

@@ -1,0 +1,105 @@
+package controller
+
+import (
+	"github.com/gin-gonic/gin"
+
+	"video-captions/enum"
+	"video-captions/internal/dto/req"
+	"video-captions/internal/logic"
+	"video-captions/internal/model"
+	"video-captions/utils/response"
+)
+
+// VideoController 视频管理控制器
+type VideoController struct {
+	videoLogic *logic.VideoLogic
+}
+
+// NewVideoController 创建视频管理控制器
+func NewVideoController() *VideoController {
+	return &VideoController{
+		videoLogic: logic.NewVideoLogic(),
+	}
+}
+
+// Scan 扫描本地视频目录
+// POST /api/v1/videos/scan
+func (ctl *VideoController) Scan(c *gin.Context) {
+	var scanReq req.VideoScanReq
+	if err := c.ShouldBindJSON(&scanReq); err != nil {
+		response.FailByBizError(c, enum.ErrInvalidParam)
+		return
+	}
+
+	// 若请求体 path 为空，则使用配置的 video_dir
+	if scanReq.Path == "" {
+		scanReq.Path = model.SettingGet(c.Request.Context(), model.SettingKeyVideoDir)
+	}
+	if scanReq.Path == "" {
+		response.FailByBizError(c, enum.ErrInvalidParam.WithMsg("扫描路径为空，且未配置视频目录"))
+		return
+	}
+
+	res, err := ctl.videoLogic.ScanDir(c.Request.Context(), &scanReq)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	response.Success(c, res)
+}
+
+// List 分页查询视频列表
+// GET /api/v1/videos
+func (ctl *VideoController) List(c *gin.Context) {
+	var listReq req.VideoListReq
+	if err := c.ShouldBindQuery(&listReq); err != nil {
+		response.FailByBizError(c, enum.ErrInvalidParam)
+		return
+	}
+
+	res, err := ctl.videoLogic.List(c.Request.Context(), &listReq)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	response.Success(c, res)
+}
+
+// Update 更新视频信息
+// PUT /api/v1/videos/:id
+func (ctl *VideoController) Update(c *gin.Context) {
+	id := c.Param("id")
+	if id == "" {
+		response.FailByBizError(c, enum.ErrInvalidParam)
+		return
+	}
+
+	var updateReq req.VideoUpdateReq
+	if err := c.ShouldBindJSON(&updateReq); err != nil {
+		response.FailByBizError(c, enum.ErrInvalidParam)
+		return
+	}
+
+	res, err := ctl.videoLogic.Update(c.Request.Context(), id, &updateReq)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	response.Success(c, res)
+}
+
+// Delete 删除视频记录
+// DELETE /api/v1/videos/:id
+func (ctl *VideoController) Delete(c *gin.Context) {
+	id := c.Param("id")
+	if id == "" {
+		response.FailByBizError(c, enum.ErrInvalidParam)
+		return
+	}
+
+	if err := ctl.videoLogic.Delete(c.Request.Context(), id); err != nil {
+		HandleError(c, err)
+		return
+	}
+	response.Success(c, nil)
+}
