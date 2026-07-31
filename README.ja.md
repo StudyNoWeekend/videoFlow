@@ -69,7 +69,7 @@ Whisper や FFmpeg を単体で使うのは難しくありませんが、「デ�
 
 ### 方法 0：ワンクリックスクリプトデプロイ（最も推奨）
 
-本プロジェクトは [`install.sh`](./install.sh) ワンクリックインストールスクリプトを提供しており、以下のすべてのステップを自動的に完了します：
+本プロジェクトは [`install.ja.sh`](./install.ja.sh) ワンクリックインストールスクリプトを提供しており、以下のすべてのステップを自動的に完了します：
 
 - Docker 環境の検出
 - [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice) のデプロイ（CPU/GPU、エンジンとモデルの選択に対応）
@@ -78,10 +78,12 @@ Whisper や FFmpeg を単体で使うのは難しくありませんが、「デ�
 - 設定のガイドとプロジェクトコンテナの起動
 
 ```bash
-bash install.sh
+bash install.ja.sh
 ```
 
 スクリプトはインタラクティブにガイドします。プロンプトに従って選択してください。完了後、各サービスのアクセス URL が出力されます。
+
+> スクリプトは他の言語でも利用可能です：[简体中文](./install.sh) · [English](./install.en.sh) · [繁體中文](./install.zh-TW.sh)
 
 <details>
 <summary><b>スクリプトのオプション</b></summary>

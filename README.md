@@ -83,6 +83,8 @@ bash install.sh
 
 脚本采用交互式引导，按提示选择即可。完成后会输出各服务的访问地址。
 
+> 脚本还提供其他语言版本：[English](./install.en.sh) · [日本語](./install.ja.sh) · [繁體中文](./install.zh-TW.sh)
+
 <details>
 <summary><b>脚本支持的可选项</b></summary>
 

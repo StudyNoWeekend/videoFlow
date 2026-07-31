@@ -69,7 +69,7 @@ Under the hood it reuses the recognition power of [Whisper ASR Webservice](https
 
 ### Option 0: One-click script (highly recommended)
 
-The project provides an [`install.sh`](./install.sh) one-click installer that automatically completes all of the following:
+The project provides an [`install.en.sh`](./install.en.sh) one-click installer that automatically completes all of the following:
 
 - Detects the Docker environment
 - Deploys [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice) (supports CPU/GPU, engine and model selection)
@@ -78,10 +78,12 @@ The project provides an [`install.sh`](./install.sh) one-click installer that au
 - Guides you through config and starts the project container
 
 ```bash
-bash install.sh
+bash install.en.sh
 ```
 
 The script is interactive-just follow the prompts. Once finished, it prints the access URLs for all services.
+
+> The script is also available in other languages: [简体中文](./install.sh) · [日本語](./install.ja.sh) · [繁體中文](./install.zh-TW.sh)
 
 <details>
 <summary><b>Script options</b></summary>
