@@ -9,22 +9,14 @@ import { formatDuration, formatFileSize } from '@/utils/format'
 
 const settingsStore = useSettingsStore()
 
-// 扫描目录路径
 const scanPath = ref<string>('')
-// 加载状态
 const loading = ref<boolean>(false)
-// 扫描加载状态
 const scanning = ref<boolean>(false)
-// 视频列表数据
 const videoList = ref<Video[]>([])
-// 分页信息
 const page = ref<number>(1)
 const pageSize = ref<number>(12)
 const total = ref<number>(0)
 
-/**
- * 加载视频列表
- */
 async function loadVideos(): Promise<void> {
   loading.value = true
   try {
@@ -38,9 +30,6 @@ async function loadVideos(): Promise<void> {
   }
 }
 
-/**
- * 扫描目录
- */
 async function handleScan(): Promise<void> {
   const path = scanPath.value.trim() || settingsStore.setting.video_dir
   if (!path) {
@@ -57,10 +46,6 @@ async function handleScan(): Promise<void> {
   }
 }
 
-/**
- * 删除视频记录
- * @param video 视频对象
- */
 async function handleDelete(video: Video): Promise<void> {
   try {
     await ElMessageBox.confirm(`确定删除视频记录 "${video.name}" 吗？`, '提示', {
@@ -78,18 +63,10 @@ async function handleDelete(video: Video): Promise<void> {
   }
 }
 
-/**
- * 判断任务是否运行中
- * @param task 任务快照
- */
 function isTaskRunning(task?: TaskSnapshot): boolean {
   return !!task && (task.status === 'pending' || task.status === 'running')
 }
 
-/**
- * 发起字幕任务
- * @param video 视频对象
- */
 async function handleSubtitle(video: Video): Promise<void> {
   if (isTaskRunning(video.subtitle_task)) return
   try {
@@ -101,10 +78,6 @@ async function handleSubtitle(video: Video): Promise<void> {
   }
 }
 
-/**
- * 发起修复任务
- * @param video 视频对象
- */
 async function handleRepair(video: Video): Promise<void> {
   if (isTaskRunning(video.repair_task)) return
   try {
@@ -116,38 +89,19 @@ async function handleRepair(video: Video): Promise<void> {
   }
 }
 
-/**
- * 发起翻译任务（暂时禁用）
- * @param video 视频对象
- */
-// async function handleTranslate(video: Video): Promise<void> {
-//   if (isTaskRunning(video.translate_task)) return
-//   if (!video.subtitle_task || video.subtitle_task.status !== 'completed') {
-//     ElMessage.warning('请先完成字幕生成')
-//     return
-//   }
-//   try {
-//     await createTask(video.id, 'translate')
-//     ElMessage.success('翻译任务已创建')
-//     await loadVideos()
-//   } catch {
-//     // 请求失败已由拦截器提示
-//   }
-// }
+function taskStatusLed(task?: TaskSnapshot): string {
+  if (!task) return ''
+  if (task.status === 'completed') return 'vf-led--green'
+  if (task.status === 'failed') return 'vf-led--red'
+  if (task.status === 'running' || task.status === 'pending') return 'vf-led--amber vf-led--pulse'
+  return ''
+}
 
-/**
- * 处理分页变化
- * @param currentPage 当前页
- */
 function handlePageChange(currentPage: number): void {
   page.value = currentPage
   loadVideos()
 }
 
-/**
- * 处理每页数量变化
- * @param size 每页数量
- */
 function handleSizeChange(size: number): void {
   pageSize.value = size
   page.value = 1
@@ -161,212 +115,310 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="videos-page">
-    <h2>视频列表</h2>
+  <div class="videos-view">
+    <div class="vf-panel">
+      <div class="vf-panel__footer"></div>
 
-    <!-- 扫描区域 -->
-    <div class="scan-bar">
-      <el-input
-        v-model="scanPath"
-        placeholder="请输入本地视频目录路径，为空时使用配置目录"
-        clearable
-        style="width: 400px"
-        @keyup.enter="handleScan"
-      />
-      <el-button type="primary" :loading="scanning" @click="handleScan">
-        <el-icon><Search /></el-icon>扫描
-      </el-button>
-      <el-button @click="loadVideos">
-        <el-icon><Refresh /></el-icon>刷新
-      </el-button>
-    </div>
+      <!-- 面板标题 / 扫描控制 -->
+      <div class="vf-panel-header">
+        <div class="vf-panel-header__title">
+          <span class="vf-led vf-led--amber vf-led--pulse"></span>
+          <span>视频资源库</span>
+          <span class="header__count">{{ total }} 个资源</span>
+        </div>
 
-    <!-- 视频卡片列表 -->
-    <el-row v-loading="loading" :gutter="16">
-      <el-col v-for="video in videoList" :key="video.id" :xs="24" :sm="12" :md="8" :lg="6">
-        <el-card class="video-card" shadow="hover">
-          <template #header>
-            <div class="card-header">
-              <span class="video-name" :title="video.name">{{ video.name }}</span>
+        <div class="scan-control">
+          <el-input
+            v-model="scanPath"
+            placeholder="输入本地视频目录路径，为空时使用配置目录"
+            clearable
+            style="width: 380px"
+            @keyup.enter="handleScan"
+          />
+          <el-button type="primary" :loading="scanning" @click="handleScan">
+            <el-icon><Search /></el-icon>扫描
+          </el-button>
+          <el-button @click="loadVideos">
+            <el-icon><Refresh /></el-icon>刷新
+          </el-button>
+        </div>
+      </div>
+
+      <div class="panel-body">
+        <el-row v-loading="loading" :gutter="16">
+          <el-col v-for="video in videoList" :key="video.id" :xs="24" :sm="12" :md="8" :lg="6" :xl="4">
+            <div class="asset-card">
+              <div class="asset-card__header">
+                <span class="asset-card__name" :title="video.name">{{ video.name }}</span>
+                <span class="asset-card__id">#{{ video.id.slice(-6).toUpperCase() }}</span>
+              </div>
+
+              <div class="asset-card__metrics">
+                <div class="metric">
+                  <span class="vf-data-label">时长</span>
+                  <span class="vf-data-value">{{ formatDuration(video.duration) }}</span>
+                </div>
+                <div class="metric">
+                  <span class="vf-data-label">大小</span>
+                  <span class="vf-data-value">{{ formatFileSize(video.size) }}</span>
+                </div>
+              </div>
+
+              <div class="asset-card__path">
+                <span class="vf-data-label">路径</span>
+                <span class="path-value" :title="video.path">{{ video.path }}</span>
+              </div>
+
+              <div class="asset-card__signals">
+                <div class="signal-row">
+                  <span class="vf-data-label">字幕</span>
+                  <span v-if="video.subtitle_task" :class="['vf-led', taskStatusLed(video.subtitle_task)]"></span>
+                  <span v-else class="signal-empty">--</span>
+                  <el-progress
+                    v-if="video.subtitle_task"
+                    :percentage="video.subtitle_task.progress"
+                    :status="video.subtitle_task.status === 'failed' ? 'exception' : video.subtitle_task.status === 'completed' ? 'success' : ''"
+                    :stroke-width="6"
+                    class="signal-progress"
+                  />
+                </div>
+                <div class="signal-row">
+                  <span class="vf-data-label">修复</span>
+                  <span v-if="video.repair_task" :class="['vf-led', taskStatusLed(video.repair_task)]"></span>
+                  <span v-else class="signal-empty">--</span>
+                  <el-progress
+                    v-if="video.repair_task"
+                    :percentage="video.repair_task.progress"
+                    :status="video.repair_task.status === 'failed' ? 'exception' : video.repair_task.status === 'completed' ? 'success' : ''"
+                    :stroke-width="6"
+                    class="signal-progress"
+                  />
+                </div>
+              </div>
+
+              <div class="asset-card__actions">
+                <el-button
+                  type="primary"
+                  size="small"
+                  :disabled="isTaskRunning(video.subtitle_task)"
+                  :loading="video.subtitle_task?.status === 'running'"
+                  @click="handleSubtitle(video)"
+                >
+                  生成字幕
+                </el-button>
+                <el-button
+                  type="warning"
+                  size="small"
+                  :disabled="isTaskRunning(video.repair_task)"
+                  :loading="video.repair_task?.status === 'running'"
+                  @click="handleRepair(video)"
+                >
+                  视频修复
+                </el-button>
+                <el-button type="danger" size="small" @click="handleDelete(video)">删除</el-button>
+              </div>
             </div>
-          </template>
-          <div class="video-info">
-            <p class="info-item" :title="video.path">
-              <span class="info-label">路径：</span>{{ video.path }}
-            </p>
-            <p class="info-item">
-              <span class="info-label">时长：</span>{{ formatDuration(video.duration) }}
-            </p>
-            <p class="info-item">
-              <span class="info-label">大小：</span>{{ formatFileSize(video.size) }}
-            </p>
-          </div>
+          </el-col>
+        </el-row>
 
-          <div class="task-status">
-            <div v-if="video.subtitle_task" class="status-row">
-              <span class="status-label">字幕：</span>
-              <el-progress
-                :percentage="video.subtitle_task.progress"
-                :status="video.subtitle_task.status === 'failed' ? 'exception' : video.subtitle_task.status === 'completed' ? 'success' : ''"
-                :stroke-width="8"
-              />
-            </div>
-            <div v-if="video.repair_task" class="status-row">
-              <span class="status-label">修复：</span>
-              <el-progress
-                :percentage="video.repair_task.progress"
-                :status="video.repair_task.status === 'failed' ? 'exception' : video.repair_task.status === 'completed' ? 'success' : ''"
-                :stroke-width="8"
-              />
-            </div>
-            <!-- 翻译任务进度（暂时禁用）
-            <div v-if="video.translate_task" class="status-row">
-              <span class="status-label">翻译：</span>
-              <el-progress
-                :percentage="video.translate_task.progress"
-                :status="video.translate_task.status === 'failed' ? 'exception' : video.translate_task.status === 'completed' ? 'success' : ''"
-                :stroke-width="8"
-              />
-            </div>
-            -->
-          </div>
+        <el-empty v-if="!loading && videoList.length === 0" description="暂无视频资源" />
+      </div>
 
-          <div class="card-actions">
-            <el-button
-              type="primary"
-              size="small"
-              :disabled="isTaskRunning(video.subtitle_task)"
-              :loading="video.subtitle_task?.status === 'running'"
-              @click="handleSubtitle(video)"
-            >
-              生成字幕
-            </el-button>
-            <el-button
-              type="warning"
-              size="small"
-              :disabled="isTaskRunning(video.repair_task)"
-              :loading="video.repair_task?.status === 'running'"
-              @click="handleRepair(video)"
-            >
-              视频修复
-            </el-button>
-            <!-- 翻译字幕按钮（暂时禁用）
-            <el-tooltip
-              v-if="!video.subtitle_task || video.subtitle_task.status !== 'completed'"
-              content="请先完成字幕生成"
-              placement="top"
-            >
-              <el-button
-                type="success"
-                size="small"
-                disabled
-              >
-                翻译字幕
-              </el-button>
-            </el-tooltip>
-            <el-button
-              v-else
-              type="success"
-              size="small"
-              :disabled="isTaskRunning(video.translate_task)"
-              :loading="video.translate_task?.status === 'running'"
-              @click="handleTranslate(video)"
-            >
-              翻译字幕
-            </el-button>
-            -->
-            <el-button type="danger" size="small" @click="handleDelete(video)">删除</el-button>
-          </div>
-        </el-card>
-      </el-col>
-    </el-row>
-
-    <el-empty v-if="!loading && videoList.length === 0" description="暂无视频" />
-
-    <!-- 分页 -->
-    <div class="pagination">
-      <el-pagination
-        v-model:current-page="page"
-        v-model:page-size="pageSize"
-        :total="total"
-        :page-sizes="[12, 24, 48, 96]"
-        layout="total, sizes, prev, pager, next"
-        @size-change="handleSizeChange"
-        @current-change="handlePageChange"
-      />
+      <div class="panel-footer">
+        <el-pagination
+          v-model:current-page="page"
+          v-model:page-size="pageSize"
+          :total="total"
+          :page-sizes="[12, 24, 48, 96]"
+          layout="total, sizes, prev, pager, next"
+          @size-change="handleSizeChange"
+          @current-change="handlePageChange"
+        />
+      </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-.videos-page {
+.videos-view {
   padding: 20px;
+  min-height: 100%;
 }
 
-.scan-bar {
+.vf-panel {
+  min-height: calc(100vh - 92px);
   display: flex;
-  gap: 12px;
-  margin-bottom: 16px;
+  flex-direction: column;
 }
 
-.video-card {
-  margin-bottom: 16px;
+.header__count {
+  font-family: var(--vf-font-mono);
+  font-size: 11px;
+  color: var(--vf-text-muted);
+  border: 1px solid var(--vf-border);
+  padding: 2px 8px;
+  border-radius: var(--vf-radius-sm);
+  margin-left: 8px;
 }
 
-.card-header {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.video-name {
-  font-weight: 500;
-}
-
-.video-info {
-  margin-bottom: 12px;
-}
-
-.info-item {
-  margin: 4px 0;
-  font-size: 13px;
-  color: #606266;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.info-label {
-  color: #909399;
-}
-
-.task-status {
-  margin-bottom: 12px;
-}
-
-.status-row {
+.scan-control {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
+  gap: 10px;
+}
+
+.panel-body {
+  padding: 16px;
+  flex: 1;
+}
+
+.panel-footer {
+  padding: 12px 16px;
+  border-top: 1px solid var(--vf-border);
+  display: flex;
+  justify-content: flex-end;
+}
+
+.asset-card {
+  background: var(--vf-bg-elevated);
+  border: 1px solid var(--vf-border);
+  border-radius: var(--vf-radius);
+  margin-bottom: 16px;
+  overflow: hidden;
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.asset-card::before,
+.asset-card::after {
+  content: '';
+  position: absolute;
+  top: -1px;
+  width: 6px;
+  height: 6px;
+  border: 1px solid var(--vf-border-light);
+}
+
+.asset-card::before {
+  left: -1px;
+  border-right: 0;
+  border-bottom: 0;
+}
+
+.asset-card::after {
+  right: -1px;
+  border-left: 0;
+  border-bottom: 0;
+}
+
+.asset-card:hover {
+  border-color: var(--vf-border-active);
+  box-shadow: 0 0 0 1px var(--vf-border-active), 0 6px 18px rgba(0, 0, 0, 0.4);
+}
+
+[data-theme='light'] .asset-card:hover {
+  box-shadow: 0 0 0 1px var(--vf-border-active), 0 6px 18px rgba(0, 0, 0, 0.12);
+}
+
+.asset-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--vf-border);
+  background: var(--vf-bg-panel-hover);
+}
+
+.asset-card__name {
+  font-family: var(--vf-font-display);
+  font-weight: 500;
+  font-size: 14px;
+  color: var(--vf-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.asset-card__id {
+  font-family: var(--vf-font-mono);
+  font-size: 10px;
+  color: var(--vf-text-muted);
+  letter-spacing: 0.05em;
+}
+
+.asset-card__metrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: var(--vf-border);
+  border-bottom: 1px solid var(--vf-border);
+}
+
+.metric {
+  background: var(--vf-bg-elevated);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.metric .vf-data-value {
   font-size: 13px;
 }
 
-.status-label {
-  width: 48px;
-  color: #606266;
+.asset-card__path {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--vf-border);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.path-value {
+  font-family: var(--vf-font-mono);
+  font-size: 11px;
+  color: var(--vf-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.asset-card__signals {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--vf-border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.signal-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.signal-row .vf-data-label {
+  width: 36px;
   flex-shrink: 0;
 }
 
-.card-actions {
+.signal-empty {
+  font-family: var(--vf-font-mono);
+  font-size: 11px;
+  color: var(--vf-text-disabled);
+}
+
+.signal-progress {
+  flex: 1;
+}
+
+.asset-card__actions {
+  padding: 12px;
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-}
-
-.pagination {
-  margin-top: 16px;
-  display: flex;
-  justify-content: flex-end;
+  background: var(--vf-bg-panel-hover);
 }
 </style>
