@@ -74,7 +74,7 @@ func main() {
 		log.Fatalf("启动视频目录扫描器失败: %v", err)
 	}
 
-	// 初始化路由
+	// 初始化路由（后端端口固定 8080，不暴露给宿主机，由 nginx 反向代理）
 	r := router.SetupRouter(&cfg.HTTP)
 
 	addr := fmt.Sprintf(":%d", cfg.HTTP.Port)
