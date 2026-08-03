@@ -65,36 +65,7 @@
 
 ## 📥 快速开始
 
-### 方式零：一键脚本部署（最推荐）
-
-项目提供 [`install.sh`](./install.sh) 一键安装脚本，自动完成以下全部步骤：
-
-- 检测 Docker 环境
-- 部署 [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice)（支持 CPU/GPU、引擎与模型选择）
-- 拉取 [`ladaapp/lada`](https://github.com/ladaapp/lada) 视频修复镜像
-- 安装 [FFmpeg](https://ffmpeg.org/)（支持 macOS / Linux / Windows）
-- 引导配置并启动本项目容器
-
-```bash
-bash install.sh
-```
-
-脚本采用交互式引导，按提示选择即可。完成后会输出各服务的访问地址。
-
-> 脚本还提供其他语言版本：[English](./install.en.sh) · [日本語](./install.ja.sh) · [繁體中文](./install.zh-TW.sh)
-
-<details>
-<summary><b>脚本支持的可选项</b></summary>
-
-- **运行模式**：CPU 模式（全平台通用）/ GPU 模式（仅 Linux + NVIDIA GPU）
-- **ASR 引擎**：`openai_whisper`（默认）/ `faster_whisper` / `whisperx`
-- **字幕模型**：`tiny` / `base` / `small` / `medium` / `large-v3` / `large-v3-turbo` 及英文专用模型
-- **模型缓存持久化**：加速后续启动
-- **FFmpeg 安装**：自动识别包管理器（Homebrew / apt / dnf / yum / pacman / apk / winget / choco）
-
-</details>
-
-### 方式一：拉取镜像部署
+### 方式一：Docker 部署（推荐）
 
 镜像已发布到 GitHub Container Registry：
 
@@ -151,7 +122,7 @@ docker run -d --name videoflow \
   video-captions:latest
 ```
 
-Dockerfile 为多阶段构建：华为云 `golang:1.25-alpine` 编译（CGO）+ `alpine:3.20` 运行（内置 ffmpeg）。镜像为 `linux/amd64`，Apple Silicon 上通过 QEMU 运行。
+Dockerfile 为多阶段构建：`golang:1.25-alpine` 编译（CGO）+ `alpine:3.20` 运行（内置 ffmpeg）。支持 `linux/amd64` 和 `linux/arm64` 双架构。
 
 </details>
 
@@ -419,9 +390,9 @@ videoFlow/
 - ✅ 运行时配置在线修改 + 持久化
 - ✅ Docker 部署 + 端口运行时指定
 - ✅ FFmpeg 智能本地调用
+- ✅ 多架构镜像（amd64 + arm64 原生支持）
 - 🔲 字幕在线预览 / 编辑
 - 🔲 字幕文件导出下载
-- 🔲 多架构镜像（arm64 原生支持）
 
 ## 💌 致谢
 

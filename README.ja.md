@@ -65,36 +65,7 @@ Whisper や FFmpeg を単体で使うのは難しくありませんが、「デ�
 
 ## 📥 クイックスタート
 
-### 方法 0：ワンクリックスクリプトデプロイ（最も推奨）
-
-本プロジェクトは [`install.ja.sh`](./install.ja.sh) ワンクリックインストールスクリプトを提供しており、以下のすべてのステップを自動的に完了します：
-
-- Docker 環境の検出
-- [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice) のデプロイ（CPU/GPU、エンジンとモデルの選択に対応）
-- [`ladaapp/lada`](https://github.com/ladaapp/lada) 動画修復イメージのプル
-- [FFmpeg](https://ffmpeg.org/) のインストール（macOS / Linux / Windows に対応）
-- 設定のガイドとプロジェクトコンテナの起動
-
-```bash
-bash install.ja.sh
-```
-
-スクリプトはインタラクティブにガイドします。プロンプトに従って選択してください。完了後、各サービスのアクセス URL が出力されます。
-
-> スクリプトは他の言語でも利用可能です：[简体中文](./install.sh) · [English](./install.en.sh) · [繁體中文](./install.zh-TW.sh)
-
-<details>
-<summary><b>スクリプトのオプション</b></summary>
-
-- **実行モード**：CPU モード（全プラットフォーム対応）/ GPU モード（Linux + NVIDIA GPU のみ）
-- **ASR エンジン**：`openai_whisper`（デフォルト）/ `faster_whisper` / `whisperx`
-- **字幕モデル**：`tiny` / `base` / `small` / `medium` / `large-v3` / `large-v3-turbo` および英語専用モデル
-- **モデルキャッシュの永続化**：後続の起動を高速化
-- **FFmpeg インストール**：パッケージマネージャを自動検出（Homebrew / apt / dnf / yum / pacman / apk / winget / choco）
-
-</details>
-
-### 方法 1：イメージをプルしてデプロイ
+### 方法 1：Docker デプロイ（推奨）
 
 イメージは GitHub Container Registry に公開されています：
 
@@ -151,7 +122,7 @@ docker run -d --name videoflow \
   video-captions:latest
 ```
 
-Dockerfile はマルチステージビルドです：Huawei Cloud の `golang:1.25-alpine` でコンパイル（CGO）し、`alpine:3.20` で実行（ffmpeg 内蔵）します。イメージは `linux/amd64` で、Apple Silicon では QEMU 経由で動作します。
+Dockerfile はマルチステージビルドです：`golang:1.25-alpine` でコンパイル（CGO）し、`alpine:3.20` で実行（ffmpeg 内蔵）します。`linux/amd64` と `linux/arm64` の両方に対応しています。
 
 </details>
 
@@ -419,9 +390,9 @@ videoFlow/
 - ✅ ランタイム設定のオンライン変更 + 永続化
 - ✅ Docker デプロイ + 実行時のポート指定
 - ✅ FFmpeg スマートローカル呼び出し
+- ✅ マルチアーキテクチャイメージ（amd64 + arm64 ネイティブサポート）
 - 🔲 字幕のオンラインプレビュー / 編集
 - 🔲 字幕ファイルのエクスポート/ダウンロード
-- 🔲 マルチアーキテクチャイメージ（arm64 ネイティブサポート）
 
 ## 💌 謝辞
 

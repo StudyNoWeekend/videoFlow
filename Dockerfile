@@ -1,5 +1,5 @@
 # ====== 阶段 1：构建前端 ======
-FROM --platform=linux/amd64 node:22-alpine AS frontend-builder
+FROM node:22-alpine AS frontend-builder
 
 WORKDIR /frontend
 
@@ -12,18 +12,18 @@ COPY frontend/ ./
 RUN npm run build-only
 
 # ====== 阶段 2：构建后端 ======
-# 使用指定的华为云 golang 镜像（该镜像仅 amd64，故显式指定平台，保证构建/运行阶段架构一致）
-FROM --platform=linux/amd64 swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/golang:1.25-alpine AS backend-builder
+# 使用官方 golang 镜像（支持 amd64 + arm64 多架构，配合 buildx 使用）
+FROM golang:1.25-alpine AS backend-builder
 
 # CGO 依赖：gorm 的 sqlite 驱动基于 mattn/go-sqlite3，需要 gcc + musl-dev
 # git：go mod download 拉取部分依赖时需要
 RUN apk add --no-cache gcc musl-dev git
 
-# 国内构建加速；CGO_ENABLED=1 以链接 sqlite 驱动
+# CGO_ENABLED=1 以链接 sqlite 驱动
+# 不固定 GOARCH，由 buildx --platform 自动注入 TARGETARCH
 ENV GOPROXY=https://goproxy.cn,direct \
     CGO_ENABLED=1 \
-    GOOS=linux \
-    GOARCH=amd64
+    GOOS=linux
 
 WORKDIR /build
 
@@ -36,8 +36,7 @@ COPY backend/ ./
 RUN go build -trimpath -ldflags="-s -w" -o /out/video-captions ./cmd/api
 
 # ====== 阶段 3：运行时 ======
-# 与构建阶段同架构（amd64），保证二进制可执行
-FROM --platform=linux/amd64 alpine:3.20
+FROM alpine:3.20
 
 # 运行时依赖：
 #  - ffmpeg（含 ffprobe）：ffmpeg.provider=local 时必需

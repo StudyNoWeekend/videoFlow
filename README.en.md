@@ -65,36 +65,7 @@ Under the hood it reuses the recognition power of [Whisper ASR Webservice](https
 
 ## 📥 Quick Start
 
-### Option 0: One-click script (highly recommended)
-
-The project provides an [`install.en.sh`](./install.en.sh) one-click installer that automatically completes all of the following:
-
-- Detects the Docker environment
-- Deploys [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice) (supports CPU/GPU, engine and model selection)
-- Pulls the [`ladaapp/lada`](https://github.com/ladaapp/lada) video repair image
-- Installs [FFmpeg](https://ffmpeg.org/) (supports macOS / Linux / Windows)
-- Guides you through config and starts the project container
-
-```bash
-bash install.en.sh
-```
-
-The script is interactive-just follow the prompts. Once finished, it prints the access URLs for all services.
-
-> The script is also available in other languages: [简体中文](./install.sh) · [日本語](./install.ja.sh) · [繁體中文](./install.zh-TW.sh)
-
-<details>
-<summary><b>Script options</b></summary>
-
-- **Run mode**: CPU mode (all platforms) / GPU mode (Linux + NVIDIA GPU only)
-- **ASR engine**: `openai_whisper` (default) / `faster_whisper` / `whisperx`
-- **Subtitle model**: `tiny` / `base` / `small` / `medium` / `large-v3` / `large-v3-turbo` and English-only models
-- **Model cache persistence**: speeds up subsequent starts
-- **FFmpeg installation**: auto-detects package manager (Homebrew / apt / dnf / yum / pacman / apk / winget / choco)
-
-</details>
-
-### Option 1: Pull the image
+### Option 1: Docker deployment (recommended)
 
 The image is published on the GitHub Container Registry:
 
@@ -151,7 +122,7 @@ docker run -d --name videoflow \
   video-captions:latest
 ```
 
-The Dockerfile uses a multi-stage build: Huawei Cloud `golang:1.25-alpine` for compilation (CGO) + `alpine:3.20` for runtime (with ffmpeg built in). The image is `linux/amd64` and runs via QEMU on Apple Silicon.
+The Dockerfile uses a multi-stage build: `golang:1.25-alpine` for compilation (CGO) + `alpine:3.20` for runtime (with ffmpeg built in). Supports both `linux/amd64` and `linux/arm64`.
 
 </details>
 
@@ -419,9 +390,9 @@ Defaults to `data/app.db` (SQLite). When deploying with Docker, mount the `/app/
 - ✅ Online runtime config editing + persistence
 - ✅ Docker deployment + runtime port specification
 - ✅ FFmpeg smart local invocation
+- ✅ Multi-architecture images (native amd64 + arm64 support)
 - 🔲 Subtitle online preview / editing
 - 🔲 Subtitle file export & download
-- 🔲 Multi-architecture images (native arm64 support)
 
 ## 💌 Acknowledgements
 
