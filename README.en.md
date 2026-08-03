@@ -63,8 +63,6 @@ Under the hood it reuses the recognition power of [Whisper ASR Webservice](https
 - **FFmpeg dual mode** - Call locally, or invoke a remote ffmpeg over SSH, hot-switchable at runtime
 - **Engineering** - `trace_id` end-to-end tracing, unified response structure, zap structured logging, graceful shutdown (running tasks auto-marked as failed on restart)
 
-> The translation feature (based on [Ollama](https://github.com/ollama/ollama)) is implemented on the backend, but the frontend entry point is not yet enabled-it will be opened up later.
-
 ## 📥 Quick Start
 
 ### Option 0: One-click script (highly recommended)
@@ -204,7 +202,6 @@ Open the local address Vite prints in your browser.
 | ASR | [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice) | Speech recognition engine |
 | Audio/Video | [FFmpeg](https://ffmpeg.org/) / ffprobe | Audio extraction, duration probing, local / SSH |
 | Video repair | [`ladaapp/lada`](https://hub.docker.com/r/ladaapp/lada) | Docker repair engine |
-| Translation | [Ollama](https://github.com/ollama/ollama) | Local LLM inference (translation feature) |
 | Frontend | [Vue 3](https://vuejs.org/) + [Element Plus](https://element-plus.org/) + [Vite](https://vite.dev/) | Graphical UI |
 | State management | [Pinia](https://pinia.vuejs.org/) | Frontend state |
 | HTTP client | [Axios](https://axios-http.com/) | API requests |
@@ -247,13 +244,9 @@ asr:
 repair:
   docker_image: ladaapp/lada:latest
   device: cpu            # cpu / cuda:0 / mps / xpu:0
-translation:
-  ollama_url: http://localhost:11434/api/generate
-  model: qwen3.5:0.8b
 concurrency:
   subtitle: 2
   repair: 1
-  translate: 1
 ```
 
 </details>
@@ -354,7 +347,7 @@ Task status: `pending` -> `running` -> `completed` / `failed`
 videoFlow/
 ├── backend/
 │   ├── cmd/api/              # Entry point main.go
-│   ├── bootstrap/            # Init for config, DB, ASR, FFmpeg, translation, repair, etc.
+│   ├── bootstrap/            # Init for config, DB, ASR, FFmpeg, repair, etc.
 │   ├── config/               # Config files (config.yaml.local is the template)
 │   ├── internal/
 │   │   ├── controller/       # HTTP controllers
@@ -365,7 +358,6 @@ videoFlow/
 │   │   ├── asr/              # ASR client
 │   │   ├── ffmpeg/           # FFmpeg local/SSH executor
 │   │   ├── repair/           # Video repair executor
-│   │   ├── translation/      # Ollama translation
 │   │   ├── subtitle/         # Subtitle parsing
 │   │   ├── scanner/          # Video directory scanner
 │   │   └── scheduler/        # Task scheduler
@@ -420,13 +412,6 @@ Defaults to `data/app.db` (SQLite). When deploying with Docker, mount the `/app/
 
 </details>
 
-<details>
-<summary><b>When will the translation feature be available?</b></summary>
-
-The translation (based on Ollama) backend logic is implemented, but the frontend entry point is not yet enabled-it will be opened in a later release. You can enable it yourself by uncommenting the relevant code in `frontend/src/views/VideosView.vue`.
-
-</details>
-
 ## 🗺️ Roadmap
 
 - ✅ Video scanning + subtitle generation + video repair
@@ -434,7 +419,6 @@ The translation (based on Ollama) backend logic is implemented, but the frontend
 - ✅ Online runtime config editing + persistence
 - ✅ Docker deployment + runtime port specification
 - ✅ FFmpeg local / SSH dual mode
-- 🔲 Translation feature frontend entry point
 - 🔲 Subtitle online preview / editing
 - 🔲 Subtitle file export & download
 - 🔲 Multi-architecture images (native arm64 support)
@@ -446,7 +430,6 @@ This project stands on the shoulders of giants. Special thanks to the following 
 - **[Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice)** - by [@ahmetoner](https://github.com/ahmetoner), an ASR HTTP service based on OpenAI Whisper. VideoFlow's speech recognition is built entirely on this.
 - **[FFmpeg](https://ffmpeg.org/)** - A powerful audio/video processing tool, responsible for audio extraction and duration probing.
 - **[ladaapp/lada](https://hub.docker.com/r/ladaapp/lada)** - The video repair Docker image.
-- **[Ollama](https://github.com/ollama/ollama)** - Local LLM inference engine, powering the translation feature.
 - **[Gin](https://github.com/gin-gonic/gin)** / **[GORM](https://github.com/go-gorm/gorm)** / **[Viper](https://github.com/spf13/viper)** / **[Zap](https://github.com/uber-go/zap)** - Excellent Go foundation libraries.
 - **[Vue 3](https://vuejs.org/)** / **[Element Plus](https://element-plus.org/)** / **[Vite](https://vite.dev/)** - The frontend foundation.
 

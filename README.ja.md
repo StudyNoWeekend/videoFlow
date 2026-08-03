@@ -63,8 +63,6 @@ Whisper や FFmpeg を単体で使うのは難しくありませんが、「デ�
 - **FFmpeg デュアルモード** - ローカルで直接呼び出し、または SSH 経由でリモート ffmpeg を呼び出し、実行時にホット切り替え可能
 - **エンジニアリング** - `trace_id` による全リンクトラッキング、統一レスポンス構造、zap による構造化ログ、グレースフルシャットダウン（再起動時に実行中タスクを自動的に失敗扱い）
 
-> 翻訳機能（[Ollama](https://github.com/ollama/ollama) ベース）はバックエンドが実装済みですが、フロントエンドの入り口はまだ有効化されておらず、今後公開予定です。
-
 ## 📥 クイックスタート
 
 ### 方法 0：ワンクリックスクリプトデプロイ（最も推奨）
@@ -204,7 +202,6 @@ APP_HTTP_PORT=9090 go run ./cmd/api   # 后端
 | ASR | [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice) | 音声認識エンジン |
 | 音声/動画 | [FFmpeg](https://ffmpeg.org/) / ffprobe | 音声抽出、再生時間の検出、ローカル / SSH に対応 |
 | 動画修復 | [`ladaapp/lada`](https://hub.docker.com/r/ladaapp/lada) | Docker 修復エンジン |
-| 翻訳 | [Ollama](https://github.com/ollama/ollama) | ローカル大模型推論（翻訳機能） |
 | フロントエンド | [Vue 3](https://vuejs.org/) + [Element Plus](https://element-plus.org/) + [Vite](https://vite.dev/) | グラフィカル UI |
 | 状態管理 | [Pinia](https://pinia.vuejs.org/) | フロントエンドの状態 |
 | HTTP クライアント | [Axios](https://axios-http.com/) | API リクエスト |
@@ -247,13 +244,9 @@ asr:
 repair:
   docker_image: ladaapp/lada:latest
   device: cpu            # cpu / cuda:0 / mps / xpu:0
-translation:
-  ollama_url: http://localhost:11434/api/generate
-  model: qwen3.5:0.8b
 concurrency:
   subtitle: 2
   repair: 1
-  translate: 1
 ```
 
 </details>
@@ -354,7 +347,7 @@ viper のプレフィックスは `APP_`、設定キーの `.` は `_` に変換
 videoFlow/
 ├── backend/
 │   ├── cmd/api/              # プログラムエントリ main.go
-│   ├── bootstrap/            # 設定、DB、ASR、FFmpeg、翻訳、修復 などの初期化
+│   ├── bootstrap/            # 設定、DB、ASR、FFmpeg、修復 などの初期化
 │   ├── config/               # 設定ファイル（config.yaml.local がテンプレート）
 │   ├── internal/
 │   │   ├── controller/       # HTTP コントローラ
@@ -364,8 +357,7 @@ videoFlow/
 │   │   ├── router/           # ルーティング登録
 │   │   ├── asr/              # ASR クライアント
 │   │   ├── ffmpeg/           # FFmpeg ローカル/SSH 実行器
-│   │   ├── repair/           # 動画修復実行器
-│   │   ├── translation/      # Ollama 翻訳
+│   │   ├── repair/               # 動画修復実行器
 │   │   ├── subtitle/         # 字幕パース
 │   │   ├── scanner/          # 動画ディレクトリスキャナ
 │   │   └── scheduler/        # タスクスケジューラ
@@ -420,13 +412,6 @@ videoFlow/
 
 </details>
 
-<details>
-<summary><b>翻訳機能はいつ公開されますか？</b></summary>
-
-翻訳（Ollama ベース）のバックエンドロジックは実装済みですが、フロントエンドの入り口はまだ有効化されておらず、今後のバージョンで公開予定です。ご自身で `frontend/src/views/VideosView.vue` のコメントを外して有効化することも可能です。
-
-</details>
-
 ## 🗺️ Roadmap
 
 - ✅ 動画スキャン + 字幕生成 + 動画修復
@@ -434,7 +419,6 @@ videoFlow/
 - ✅ ランタイム設定のオンライン変更 + 永続化
 - ✅ Docker デプロイ + 実行時のポート指定
 - ✅ FFmpeg ローカル / SSH デュアルモード
-- 🔲 翻訳機能のフロントエンド入り口を公開
 - 🔲 字幕のオンラインプレビュー / 編集
 - 🔲 字幕ファイルのエクスポート/ダウンロード
 - 🔲 マルチアーキテクチャイメージ（arm64 ネイティブサポート）
@@ -446,7 +430,6 @@ videoFlow/
 - **[Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice)** - by [@ahmetoner](https://github.com/ahmetoner)、OpenAI Whisper ベースの ASR HTTP サービス。VideoFlow の音声認識能力はすべてこれに基づいています。
 - **[FFmpeg](https://ffmpeg.org/)** - 強力な音声/動画処理ツール。音声の抽出と再生時間の検出を担います。
 - **[ladaapp/lada](https://hub.docker.com/r/ladaapp/lada)** - 動画修復 Docker イメージ。
-- **[Ollama](https://github.com/ollama/ollama)** - ローカル大模型推論エンジン、翻訳機能を支える基盤。
 - **[Gin](https://github.com/gin-gonic/gin)** / **[GORM](https://github.com/go-gorm/gorm)** / **[Viper](https://github.com/spf13/viper)** / **[Zap](https://github.com/uber-go/zap)** - 優秀な Go 基盤ライブラリ。
 - **[Vue 3](https://vuejs.org/)** / **[Element Plus](https://element-plus.org/)** / **[Vite](https://vite.dev/)** - フロントエンドの基盤。
 

@@ -42,7 +42,7 @@ FROM --platform=linux/amd64 alpine:3.20
 # 运行时依赖：
 #  - ffmpeg（含 ffprobe）：ffmpeg.provider=local 时必需
 #  - openssh-client：ffmpeg.provider=ssh 时调用远程 ffmpeg 需要 ssh
-#  - ca-certificates：调用 ASR / Ollama 等 HTTPS 服务
+#  - ca-certificates：调用 ASR 等 HTTPS 服务
 #  - tzdata：时区
 #  - nginx：前端静态资源服务 + 反向代理 /api 到后端
 RUN apk add --no-cache ffmpeg openssh-client ca-certificates tzdata nginx

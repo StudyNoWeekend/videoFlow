@@ -63,8 +63,6 @@
 - **FFmpeg 双模式** - 本地直接调用，或通过 SSH 调用远程 ffmpeg，运行时可热切换
 - **工程化** - `trace_id` 全链路追踪、统一响应结构、zap 结构化日志、优雅关闭（重启时运行中任务自动标记失败）
 
-> 翻译功能（基于 [Ollama](https://github.com/ollama/ollama)）后端已实现，前端入口暂未启用，后续开放。
-
 ## 📥 快速开始
 
 ### 方式零：一键脚本部署（最推荐）
@@ -204,7 +202,6 @@ APP_HTTP_PORT=9090 go run ./cmd/api   # 后端
 | ASR | [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice) | 语音识别引擎 |
 | 音视频 | [FFmpeg](https://ffmpeg.org/) / ffprobe | 音频提取、时长探测，支持本地 / SSH |
 | 视频修复 | [`ladaapp/lada`](https://hub.docker.com/r/ladaapp/lada) | Docker 修复引擎 |
-| 翻译 | [Ollama](https://github.com/ollama/ollama) | 本地大模型推理（翻译功能） |
 | 前端 | [Vue 3](https://vuejs.org/) + [Element Plus](https://element-plus.org/) + [Vite](https://vite.dev/) | 图形界面 |
 | 状态管理 | [Pinia](https://pinia.vuejs.org/) | 前端状态 |
 | HTTP 客户端 | [Axios](https://axios-http.com/) | 接口请求 |
@@ -247,13 +244,9 @@ asr:
 repair:
   docker_image: ladaapp/lada:latest
   device: cpu            # cpu / cuda:0 / mps / xpu:0
-translation:
-  ollama_url: http://localhost:11434/api/generate
-  model: qwen3.5:0.8b
 concurrency:
   subtitle: 2
   repair: 1
-  translate: 1
 ```
 
 </details>
@@ -354,7 +347,7 @@ viper 前缀 `APP_`，配置键 `.` -> `_`，故 `http.port` 对应环境变量 
 videoFlow/
 ├── backend/
 │   ├── cmd/api/              # 程序入口 main.go
-│   ├── bootstrap/            # 配置、DB、ASR、FFmpeg、翻译、修复 等初始化
+│   ├── bootstrap/            # 配置、DB、ASR、FFmpeg、修复 等初始化
 │   ├── config/               # 配置文件（config.yaml.local 为模板）
 │   ├── internal/
 │   │   ├── controller/       # HTTP 控制器
@@ -365,7 +358,6 @@ videoFlow/
 │   │   ├── asr/              # ASR 客户端
 │   │   ├── ffmpeg/           # FFmpeg 本地/SSH 执行器
 │   │   ├── repair/           # 视频修复执行器
-│   │   ├── translation/      # Ollama 翻译
 │   │   ├── subtitle/         # 字幕解析
 │   │   ├── scanner/          # 视频目录扫描器
 │   │   └── scheduler/        # 任务调度器
@@ -420,13 +412,6 @@ videoFlow/
 
 </details>
 
-<details>
-<summary><b>翻译功能什么时候开放？</b></summary>
-
-翻译（基于 Ollama）后端逻辑已实现，前端入口暂未启用，后续版本开放。可自行在 `frontend/src/views/VideosView.vue` 中解除注释启用。
-
-</details>
-
 ## 🗺️ Roadmap
 
 - ✅ 视频扫描 + 字幕生成 + 视频修复
@@ -434,7 +419,6 @@ videoFlow/
 - ✅ 运行时配置在线修改 + 持久化
 - ✅ Docker 部署 + 端口运行时指定
 - ✅ FFmpeg 本地 / SSH 双模式
-- 🔲 翻译功能前端入口开放
 - 🔲 字幕在线预览 / 编辑
 - 🔲 字幕文件导出下载
 - 🔲 多架构镜像（arm64 原生支持）
@@ -446,7 +430,6 @@ videoFlow/
 - **[Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice)** - by [@ahmetoner](https://github.com/ahmetoner)，基于 OpenAI Whisper 的 ASR HTTP 服务，VideoFlow 的语音识别能力全部基于此。
 - **[FFmpeg](https://ffmpeg.org/)** - 强大的音视频处理工具，负责音频提取与时长探测。
 - **[ladaapp/lada](https://hub.docker.com/r/ladaapp/lada)** - 视频修复 Docker 镜像。
-- **[Ollama](https://github.com/ollama/ollama)** - 本地大模型推理引擎，为翻译功能提供支持。
 - **[Gin](https://github.com/gin-gonic/gin)** / **[GORM](https://github.com/go-gorm/gorm)** / **[Viper](https://github.com/spf13/viper)** / **[Zap](https://github.com/uber-go/zap)** - 优秀的 Go 基础库。
 - **[Vue 3](https://vuejs.org/)** / **[Element Plus](https://element-plus.org/)** / **[Vite](https://vite.dev/)** - 前端基石。
 
