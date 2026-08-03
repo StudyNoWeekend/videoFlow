@@ -1,10 +1,14 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
+import { useI18n } from 'vue-i18n'
 import { useSettingsStore } from '@/stores/settings'
 import type { Setting } from '@/api/setting'
+import ComponentManager from './ComponentManager.vue'
 
+const { t, locale } = useI18n()
 const settingsStore = useSettingsStore()
+const activeTab = ref('system')
 
 const form = ref<Setting>({
   video_dir: '',
@@ -22,13 +26,21 @@ const form = ref<Setting>({
   subtitle_concurrency: 2,
   repair_concurrency: 1,
 })
-const saving = ref<boolean>(false)
+const saving = ref(false)
+
+const currentLang = ref(locale.value)
+
+function handleLangChange(lang: string): void {
+  locale.value = lang as 'zh' | 'zh-TW' | 'en' | 'ja'
+  currentLang.value = lang
+  localStorage.setItem('videoflow-lang', lang)
+}
 
 async function handleSave(): Promise<void> {
   saving.value = true
   try {
     await settingsStore.saveSettings(form.value)
-    ElMessage.success('配置已保存')
+    ElMessage.success(t('settings.save.success'))
   } finally {
     saving.value = false
   }
@@ -48,120 +60,152 @@ onMounted(async () => {
       <div class="vf-panel-header">
         <div class="vf-panel-header__title">
           <span class="vf-led vf-led--green"></span>
-          <span>系统参数配置</span>
+          <span>{{ $t('nav.settings') }}</span>
         </div>
         <div class="header__hint">
-          <span class="vf-data-label">所有参数保存后即时生效</span>
+          <span class="vf-data-label">{{ $t('settings.hint.immediate') }}</span>
         </div>
       </div>
 
-      <div class="panel-body">
-        <el-form v-loading="settingsStore.loading" label-width="170px" class="config-form">
-          <!-- 基础配置 -->
-          <section class="config-section">
-            <div class="section-marker">
-              <span class="section-marker__line"></span>
-              <span class="section-marker__label">基础参数</span>
-              <span class="section-marker__line"></span>
-            </div>
-            <div class="section-grid section-grid--2">
-              <el-form-item label="本地视频目录">
-                <el-input v-model="form.video_dir" placeholder="请输入本地视频目录绝对路径" />
-              </el-form-item>
-              <el-form-item label="扫描间隔（秒）">
-                <el-input-number v-model="form.scan_interval" :min="1" :max="86400" />
-              </el-form-item>
-            </div>
-          </section>
-
-          <!-- ASR 配置 -->
-          <section class="config-section">
-            <div class="section-marker">
-              <span class="section-marker__line"></span>
-              <span class="section-marker__label">ASR 配置</span>
-              <span class="section-marker__line"></span>
-            </div>
-            <div class="section-grid section-grid--2">
-              <el-form-item label="ASR 服务地址">
-                <el-input v-model="form.asr_url" placeholder="例如 http://1.12.70.219:9999/asr" />
-              </el-form-item>
-              <el-form-item label="ASR 语言">
-                <el-input v-model="form.asr_language" placeholder="例如 zh" />
-              </el-form-item>
-              <el-form-item label="ASR 任务">
-                <el-radio-group v-model="form.asr_task">
-                  <el-radio-button label="transcribe">转录</el-radio-button>
-                  <el-radio-button label="translate">翻译为英文</el-radio-button>
-                </el-radio-group>
-              </el-form-item>
-              <el-form-item label="输出格式">
-                <el-select v-model="form.asr_output" style="width: 200px">
-                  <el-option label="JSON" value="json" />
-                  <el-option label="SRT" value="srt" />
-                  <el-option label="VTT" value="vtt" />
-                  <el-option label="TXT" value="txt" />
-                  <el-option label="TSV" value="tsv" />
-                </el-select>
-              </el-form-item>
-              <el-form-item label="初始提示词">
-                <el-input v-model="form.asr_initial_prompt" type="textarea" :rows="2" placeholder="可选，用于引导识别风格或术语" />
-              </el-form-item>
-              <el-form-item label="选项开关">
-                <div class="checkbox-group">
-                  <el-checkbox v-model="form.asr_vad_filter">启用 VAD 过滤</el-checkbox>
-                  <el-checkbox v-model="form.asr_encode">FFmpeg 音频编码</el-checkbox>
-                  <el-checkbox v-model="form.asr_word_timestamps">词级时间戳</el-checkbox>
+      <el-tabs v-model="activeTab" class="settings-tabs">
+        <!-- System Settings Tab -->
+        <el-tab-pane :label="$t('settings.tab.system')" name="system">
+          <div class="panel-body">
+            <el-form v-loading="settingsStore.loading" label-width="170px" class="config-form">
+              <!-- 基础配置 -->
+              <section class="config-section">
+                <div class="section-marker">
+                  <span class="section-marker__line"></span>
+                  <span class="section-marker__label">{{ $t('settings.section.basic') }}</span>
+                  <span class="section-marker__line"></span>
                 </div>
-              </el-form-item>
-            </div>
-          </section>
+                <div class="section-grid section-grid--2">
+                  <el-form-item :label="$t('settings.label.video_dir')">
+                    <el-input v-model="form.video_dir" :placeholder="$t('settings.label.video_dir')" />
+                  </el-form-item>
+                  <el-form-item :label="$t('settings.label.scan_interval')">
+                    <el-input-number v-model="form.scan_interval" :min="1" :max="86400" />
+                  </el-form-item>
+                </div>
+              </section>
 
-          <!-- 视频修复配置 -->
-          <section class="config-section">
-            <div class="section-marker">
-              <span class="section-marker__line"></span>
-              <span class="section-marker__label">视频修复配置</span>
-              <span class="section-marker__line"></span>
-            </div>
-            <div class="section-grid section-grid--2">
-              <el-form-item label="修复 Docker 镜像">
-                <el-input v-model="form.repair_docker_image" placeholder="例如 ladaapp/lada:latest" />
-              </el-form-item>
-              <el-form-item label="修复设备">
-                <el-radio-group v-model="form.repair_device">
-                  <el-radio-button label="cpu">CPU</el-radio-button>
-                  <el-radio-button label="cuda:0">CUDA</el-radio-button>
-                  <el-radio-button label="mps">MPS</el-radio-button>
-                  <el-radio-button label="xpu:0">Intel XPU</el-radio-button>
-                </el-radio-group>
-              </el-form-item>
-            </div>
-          </section>
+              <!-- ASR 配置 -->
+              <section class="config-section">
+                <div class="section-marker">
+                  <span class="section-marker__line"></span>
+                  <span class="section-marker__label">{{ $t('settings.section.asr') }}</span>
+                  <span class="section-marker__line"></span>
+                </div>
+                <div class="section-grid section-grid--2">
+                  <el-form-item :label="$t('settings.label.asr_url')">
+                    <el-input v-model="form.asr_url" :placeholder="$t('settings.label.asr_url')" />
+                  </el-form-item>
+                  <el-form-item :label="$t('settings.label.asr_language')">
+                    <el-input v-model="form.asr_language" placeholder="zh" />
+                  </el-form-item>
+                  <el-form-item :label="$t('settings.label.asr_task')">
+                    <el-radio-group v-model="form.asr_task">
+                      <el-radio-button label="transcribe">{{ $t('settings.asr_task.transcribe') }}</el-radio-button>
+                      <el-radio-button label="translate">{{ $t('settings.asr_task.translate') }}</el-radio-button>
+                    </el-radio-group>
+                  </el-form-item>
+                  <el-form-item :label="$t('settings.label.asr_output')">
+                    <el-select v-model="form.asr_output" style="width: 200px">
+                      <el-option label="JSON" value="json" />
+                      <el-option label="SRT" value="srt" />
+                      <el-option label="VTT" value="vtt" />
+                      <el-option label="TXT" value="txt" />
+                      <el-option label="TSV" value="tsv" />
+                    </el-select>
+                  </el-form-item>
+                  <el-form-item :label="$t('settings.label.asr_prompt')">
+                    <el-input v-model="form.asr_initial_prompt" type="textarea" :rows="2" />
+                  </el-form-item>
+                  <el-form-item :label="$t('settings.label.asr_options')">
+                    <div class="checkbox-group">
+                      <el-checkbox v-model="form.asr_vad_filter">{{ $t('settings.asr_option.vad') }}</el-checkbox>
+                      <el-checkbox v-model="form.asr_encode">{{ $t('settings.asr_option.encode') }}</el-checkbox>
+                      <el-checkbox v-model="form.asr_word_timestamps">{{ $t('settings.asr_option.word_timestamps') }}</el-checkbox>
+                    </div>
+                  </el-form-item>
+                </div>
+              </section>
 
-          <!-- 并发配置 -->
-          <section class="config-section">
-            <div class="section-marker">
-              <span class="section-marker__line"></span>
-              <span class="section-marker__label">并发控制</span>
-              <span class="section-marker__line"></span>
-            </div>
-            <div class="section-grid section-grid--2">
-              <el-form-item label="字幕并发数">
-                <el-slider v-model="form.subtitle_concurrency" :min="1" :max="50" show-input />
-              </el-form-item>
-              <el-form-item label="修复并发数">
-                <el-slider v-model="form.repair_concurrency" :min="1" :max="50" show-input />
-              </el-form-item>
-            </div>
-          </section>
+              <!-- 视频修复配置 -->
+              <section class="config-section">
+                <div class="section-marker">
+                  <span class="section-marker__line"></span>
+                  <span class="section-marker__label">{{ $t('settings.section.repair') }}</span>
+                  <span class="section-marker__line"></span>
+                </div>
+                <div class="section-grid section-grid--2">
+                  <el-form-item :label="$t('settings.label.repair_image')">
+                    <el-input v-model="form.repair_docker_image" placeholder="ladaapp/lada:latest" />
+                  </el-form-item>
+                  <el-form-item :label="$t('settings.label.repair_device')">
+                    <el-radio-group v-model="form.repair_device">
+                      <el-radio-button label="cpu">CPU</el-radio-button>
+                      <el-radio-button label="cuda:0">CUDA</el-radio-button>
+                      <el-radio-button label="mps">MPS</el-radio-button>
+                      <el-radio-button label="xpu:0">Intel XPU</el-radio-button>
+                    </el-radio-group>
+                  </el-form-item>
+                </div>
+              </section>
 
-          <el-form-item class="form-actions">
-            <el-button type="primary" size="large" :loading="saving" @click="handleSave">
-              <el-icon><Check /></el-icon>保存配置
-            </el-button>
-          </el-form-item>
-        </el-form>
-      </div>
+              <!-- 并发控制 -->
+              <section class="config-section">
+                <div class="section-marker">
+                  <span class="section-marker__line"></span>
+                  <span class="section-marker__label">{{ $t('settings.section.concurrency') }}</span>
+                  <span class="section-marker__line"></span>
+                </div>
+                <div class="section-grid section-grid--2">
+                  <el-form-item :label="$t('settings.label.subtitle_concurrency')">
+                    <el-slider v-model="form.subtitle_concurrency" :min="1" :max="50" show-input />
+                  </el-form-item>
+                  <el-form-item :label="$t('settings.label.repair_concurrency')">
+                    <el-slider v-model="form.repair_concurrency" :min="1" :max="50" show-input />
+                  </el-form-item>
+                </div>
+              </section>
+
+              <el-form-item class="form-actions">
+                <el-button type="primary" size="large" :loading="saving" @click="handleSave">
+                  <el-icon><Check /></el-icon>{{ $t('settings.save') }}
+                </el-button>
+              </el-form-item>
+            </el-form>
+          </div>
+        </el-tab-pane>
+
+        <!-- Component Management Tab -->
+        <el-tab-pane :label="$t('settings.tab.components')" name="components">
+          <div class="panel-body">
+            <ComponentManager />
+          </div>
+        </el-tab-pane>
+
+        <!-- Language Settings Tab -->
+        <el-tab-pane :label="$t('settings.tab.language')" name="language">
+          <div class="panel-body">
+            <section class="config-section">
+              <div class="section-marker">
+                <span class="section-marker__line"></span>
+                <span class="section-marker__label">{{ $t('settings.section.language') }}</span>
+                <span class="section-marker__line"></span>
+              </div>
+              <el-radio-group :model-value="currentLang" @change="handleLangChange">
+                <el-radio-button value="zh">{{ $t('settings.language.zh') }}</el-radio-button>
+                <el-radio-button value="zh-TW">{{ $t('settings.language.zhTW') }}</el-radio-button>
+                <el-radio-button value="en">{{ $t('settings.language.en') }}</el-radio-button>
+                <el-radio-button value="ja">{{ $t('settings.language.ja') }}</el-radio-button>
+              </el-radio-group>
+              <p class="lang-hint">{{ $t('settings.hint.immediate') }}</p>
+            </section>
+          </div>
+        </el-tab-pane>
+      </el-tabs>
     </div>
   </div>
 </template>
@@ -184,8 +228,12 @@ onMounted(async () => {
   gap: 8px;
 }
 
+.settings-tabs {
+  padding: 0 16px;
+}
+
 .panel-body {
-  padding: 20px 24px;
+  padding: 16px 0;
   flex: 1;
 }
 
@@ -251,6 +299,12 @@ onMounted(async () => {
 
 .form-actions :deep(.el-form-item__content) {
   justify-content: flex-end;
+}
+
+.lang-hint {
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--vf-text-muted);
 }
 
 @media (max-width: 1200px) {

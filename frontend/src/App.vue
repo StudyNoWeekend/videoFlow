@@ -1,30 +1,45 @@
 <script setup lang="ts">
 import { RouterView, RouterLink, useRoute } from 'vue-router'
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { elementPlusLocales } from '@/main'
 
 const route = useRoute()
+const { t, locale } = useI18n()
 
-const menuItems = [
-  { name: 'videos', label: '视频资源', icon: 'VideoCamera', code: '资源' },
-  { name: 'tasks', label: '任务监控', icon: 'List', code: '监控' },
-  { name: 'settings', label: '系统配置', icon: 'Setting', code: '配置' },
-]
+const menuItems = computed(() => [
+  { name: 'videos', label: t('nav.videos'), icon: 'VideoCamera', code: t('nav.code.videos') },
+  { name: 'tasks', label: t('nav.tasks'), icon: 'List', code: t('nav.code.tasks') },
+  { name: 'settings', label: t('nav.settings'), icon: 'Setting', code: t('nav.code.settings') },
+])
+
+// i18n locale -> BCP 47 tag for date/time formatting
+const dateTimeLocaleMap: Record<string, string> = {
+  zh: 'zh-CN',
+  'zh-TW': 'zh-TW',
+  en: 'en-US',
+  ja: 'ja-JP',
+}
+const dateTimeLocale = computed(() => dateTimeLocaleMap[locale.value] || 'zh-CN')
 
 const now = ref(new Date())
 let clockTimer: number | null = null
 
 const timeString = computed(() => {
-  return now.value.toLocaleTimeString('zh-CN', { hour12: false })
+  return now.value.toLocaleTimeString(dateTimeLocale.value, { hour12: false })
 })
 
 const dateString = computed(() => {
-  return now.value.toLocaleDateString('zh-CN')
+  return now.value.toLocaleDateString(dateTimeLocale.value)
 })
 
 const theme = ref<'dark' | 'light'>('dark')
 const isDark = computed(() => theme.value === 'dark')
 const themeIcon = computed(() => (isDark.value ? 'Moon' : 'Sunny'))
-const themeLabel = computed(() => (isDark.value ? '夜间' : '日间'))
+const themeLabel = computed(() => (isDark.value ? t('theme.dark') : t('theme.light')))
+
+// Element Plus locale (reactive)
+const epLocale = computed(() => elementPlusLocales[locale.value] || elementPlusLocales.zh)
 
 function applyTheme(): void {
   document.documentElement.setAttribute('data-theme', theme.value)
@@ -63,81 +78,83 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="workbench">
-    <!-- 顶部状态栏 -->
-    <header class="status-bar">
-      <div class="status-bar__brand">
-        <div class="brand-logo">
-          <span class="brand-logo__mark">VF</span>
-          <span class="brand-logo__text">VideoFlow</span>
+  <el-config-provider :locale="epLocale">
+    <div class="workbench">
+      <!-- 顶部状态栏 -->
+      <header class="status-bar">
+        <div class="status-bar__brand">
+          <div class="brand-logo">
+            <span class="brand-logo__mark">VF</span>
+            <span class="brand-logo__text">VideoFlow</span>
+          </div>
+          <span class="status-bar__version">v1.0.0</span>
         </div>
-        <span class="status-bar__version">v1.0.0</span>
-      </div>
 
-      <div class="status-bar__indicators">
-        <div class="indicator">
-          <span class="vf-led vf-led--green vf-led--pulse"></span>
-          <span class="indicator__label">系统在线</span>
+        <div class="status-bar__indicators">
+          <div class="indicator">
+            <span class="vf-led vf-led--green vf-led--pulse"></span>
+            <span class="indicator__label">{{ $t('app.online') }}</span>
+          </div>
+          <div class="indicator">
+            <span class="vf-led vf-led--amber"></span>
+            <span class="indicator__label">{{ $t('app.ready') }}</span>
+          </div>
         </div>
-        <div class="indicator">
-          <span class="vf-led vf-led--amber"></span>
-          <span class="indicator__label">工作台就绪</span>
-        </div>
-      </div>
 
-      <div class="status-bar__actions">
-        <button class="theme-toggle" :aria-label="themeLabel + '模式'" @click="toggleTheme">
-          <el-icon size="16">
-            <component :is="themeIcon" />
-          </el-icon>
-          <span class="theme-toggle__label">{{ themeLabel }}</span>
-        </button>
-
-        <div class="status-bar__clock">
-          <span class="clock__date">{{ dateString }}</span>
-          <span class="clock__time">{{ timeString }}</span>
-        </div>
-      </div>
-    </header>
-
-    <div class="workbench__body">
-      <!-- 侧边导航 -->
-      <aside class="side-rail">
-        <nav class="rail-menu">
-          <RouterLink
-            v-for="item in menuItems"
-            :key="item.name"
-            :to="{ name: item.name }"
-            class="rail-item"
-            :class="{ active: route.name === item.name }"
-          >
-            <div class="rail-item__code">{{ item.code }}</div>
-            <el-icon size="20">
-              <component :is="item.icon" />
+        <div class="status-bar__actions">
+          <button class="theme-toggle" :aria-label="themeLabel + ' ' + $t('theme.mode')" @click="toggleTheme">
+            <el-icon size="16">
+              <component :is="themeIcon" />
             </el-icon>
-            <span class="rail-item__label">{{ item.label }}</span>
-            <span v-if="route.name === item.name" class="rail-item__active-bar"></span>
-          </RouterLink>
-        </nav>
+            <span class="theme-toggle__label">{{ themeLabel }}</span>
+          </button>
 
-        <div class="rail-footer">
-          <div class="rail-footer__line">
-            <span class="vf-data-label">节点</span>
-            <span class="vf-data-value">本地-01</span>
-          </div>
-          <div class="rail-footer__line">
-            <span class="vf-data-label">运行时间</span>
-            <span class="vf-data-value">--:--</span>
+          <div class="status-bar__clock">
+            <span class="clock__date">{{ dateString }}</span>
+            <span class="clock__time">{{ timeString }}</span>
           </div>
         </div>
-      </aside>
+      </header>
 
-      <!-- 主内容区 -->
-      <main class="main-stage tech-grid scanlines noise">
-        <RouterView />
-      </main>
+      <div class="workbench__body">
+        <!-- 侧边导航 -->
+        <aside class="side-rail">
+          <nav class="rail-menu">
+            <RouterLink
+              v-for="item in menuItems"
+              :key="item.name"
+              :to="{ name: item.name }"
+              class="rail-item"
+              :class="{ active: route.name === item.name }"
+            >
+              <div class="rail-item__code">{{ item.code }}</div>
+              <el-icon size="20">
+                <component :is="item.icon" />
+              </el-icon>
+              <span class="rail-item__label">{{ item.label }}</span>
+              <span v-if="route.name === item.name" class="rail-item__active-bar"></span>
+            </RouterLink>
+          </nav>
+
+          <div class="rail-footer">
+            <div class="rail-footer__line">
+              <span class="vf-data-label">{{ $t('common.node') }}</span>
+              <span class="vf-data-value">{{ $t('common.local_node') }}</span>
+            </div>
+            <div class="rail-footer__line">
+              <span class="vf-data-label">{{ $t('common.uptime') }}</span>
+              <span class="vf-data-value">--:--</span>
+            </div>
+          </div>
+        </aside>
+
+        <!-- 主内容区 -->
+        <main class="main-stage tech-grid scanlines noise">
+          <RouterView />
+        </main>
+      </div>
     </div>
-  </div>
+  </el-config-provider>
 </template>
 
 <style scoped>

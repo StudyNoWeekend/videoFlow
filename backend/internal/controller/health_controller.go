@@ -24,7 +24,7 @@ func NewHealthController() *HealthController {
 
 // Health 存活检查接口
 func (ctl *HealthController) Health(c *gin.Context) {
-	res := ctl.healthLogic.Health()
+	res := ctl.healthLogic.Health(c.Request.Context())
 	response.Success(c, res)
 }
 

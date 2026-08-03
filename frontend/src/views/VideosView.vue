@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { useI18n } from 'vue-i18n'
 import { listVideos, scanVideos, deleteVideo } from '@/api/video'
 import { createTask } from '@/api/task'
 import type { Video, TaskSnapshot } from '@/api/video'
 import { useSettingsStore } from '@/stores/settings'
 import { formatDuration, formatFileSize } from '@/utils/format'
 
+const { t } = useI18n()
 const settingsStore = useSettingsStore()
 
 const scanPath = ref<string>('')
@@ -33,13 +35,13 @@ async function loadVideos(): Promise<void> {
 async function handleScan(): Promise<void> {
   const path = scanPath.value.trim() || settingsStore.setting.video_dir
   if (!path) {
-    ElMessage.warning('请输入本地目录路径或先在设置中配置视频目录')
+    ElMessage.warning(t('videos.scan.empty_path'))
     return
   }
   scanning.value = true
   try {
     const res = await scanVideos(path)
-    ElMessage.success(`扫描完成，共识别 ${res.scanned} 个视频`)
+    ElMessage.success(t('videos.scan.success', { count: res.scanned }))
     await loadVideos()
   } finally {
     scanning.value = false
@@ -48,13 +50,13 @@ async function handleScan(): Promise<void> {
 
 async function handleDelete(video: Video): Promise<void> {
   try {
-    await ElMessageBox.confirm(`确定删除视频记录 "${video.name}" 吗？`, '提示', {
-      confirmButtonText: '确定',
-      cancelButtonText: '取消',
-      type: 'warning',
-    })
+    await ElMessageBox.confirm(
+      t('videos.delete.confirm', { name: video.name }),
+      t('common.notice'),
+      { confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel'), type: 'warning' }
+    )
     await deleteVideo(video.id)
-    ElMessage.success('删除成功')
+    ElMessage.success(t('videos.delete.success'))
     await loadVideos()
   } catch (error) {
     if (error !== 'cancel') {
@@ -71,7 +73,7 @@ async function handleSubtitle(video: Video): Promise<void> {
   if (isTaskRunning(video.subtitle_task)) return
   try {
     await createTask(video.id, 'subtitle')
-    ElMessage.success('字幕任务已创建')
+    ElMessage.success(t('videos.subtitle.success'))
     await loadVideos()
   } catch {
     // 请求失败已由拦截器提示
@@ -82,7 +84,7 @@ async function handleRepair(video: Video): Promise<void> {
   if (isTaskRunning(video.repair_task)) return
   try {
     await createTask(video.id, 'repair')
-    ElMessage.success('视频修复任务已创建')
+    ElMessage.success(t('videos.repair.success'))
     await loadVideos()
   } catch {
     // 请求失败已由拦截器提示
@@ -123,23 +125,23 @@ onMounted(() => {
       <div class="vf-panel-header">
         <div class="vf-panel-header__title">
           <span class="vf-led vf-led--amber vf-led--pulse"></span>
-          <span>视频资源库</span>
-          <span class="header__count">{{ total }} 个资源</span>
+          <span>{{ $t('videos.title') }}</span>
+          <span class="header__count">{{ $t('videos.count', { count: total }) }}</span>
         </div>
 
         <div class="scan-control">
           <el-input
             v-model="scanPath"
-            placeholder="输入本地视频目录路径，为空时使用配置目录"
+            :placeholder="$t('videos.scan.placeholder')"
             clearable
             style="width: 380px"
             @keyup.enter="handleScan"
           />
           <el-button type="primary" :loading="scanning" @click="handleScan">
-            <el-icon><Search /></el-icon>扫描
+            <el-icon><Search /></el-icon>{{ $t('videos.scan') }}
           </el-button>
           <el-button @click="loadVideos">
-            <el-icon><Refresh /></el-icon>刷新
+            <el-icon><Refresh /></el-icon>{{ $t('videos.refresh') }}
           </el-button>
         </div>
       </div>
@@ -155,23 +157,23 @@ onMounted(() => {
 
               <div class="asset-card__metrics">
                 <div class="metric">
-                  <span class="vf-data-label">时长</span>
+                  <span class="vf-data-label">{{ $t('videos.label.duration') }}</span>
                   <span class="vf-data-value">{{ formatDuration(video.duration) }}</span>
                 </div>
                 <div class="metric">
-                  <span class="vf-data-label">大小</span>
+                  <span class="vf-data-label">{{ $t('videos.label.size') }}</span>
                   <span class="vf-data-value">{{ formatFileSize(video.size) }}</span>
                 </div>
               </div>
 
               <div class="asset-card__path">
-                <span class="vf-data-label">路径</span>
+                <span class="vf-data-label">{{ $t('videos.label.path') }}</span>
                 <span class="path-value" :title="video.path">{{ video.path }}</span>
               </div>
 
               <div class="asset-card__signals">
                 <div class="signal-row">
-                  <span class="vf-data-label">字幕</span>
+                  <span class="vf-data-label">{{ $t('videos.label.subtitle') }}</span>
                   <span v-if="video.subtitle_task" :class="['vf-led', taskStatusLed(video.subtitle_task)]"></span>
                   <span v-else class="signal-empty">--</span>
                   <el-progress
@@ -183,7 +185,7 @@ onMounted(() => {
                   />
                 </div>
                 <div class="signal-row">
-                  <span class="vf-data-label">修复</span>
+                  <span class="vf-data-label">{{ $t('videos.label.repair') }}</span>
                   <span v-if="video.repair_task" :class="['vf-led', taskStatusLed(video.repair_task)]"></span>
                   <span v-else class="signal-empty">--</span>
                   <el-progress
@@ -204,7 +206,7 @@ onMounted(() => {
                   :loading="video.subtitle_task?.status === 'running'"
                   @click="handleSubtitle(video)"
                 >
-                  生成字幕
+                  {{ $t('videos.btn.subtitle') }}
                 </el-button>
                 <el-button
                   type="warning"
@@ -213,15 +215,15 @@ onMounted(() => {
                   :loading="video.repair_task?.status === 'running'"
                   @click="handleRepair(video)"
                 >
-                  视频修复
+                  {{ $t('videos.btn.repair') }}
                 </el-button>
-                <el-button type="danger" size="small" @click="handleDelete(video)">删除</el-button>
+                <el-button type="danger" size="small" @click="handleDelete(video)">{{ $t('videos.btn.delete') }}</el-button>
               </div>
             </div>
           </el-col>
         </el-row>
 
-        <el-empty v-if="!loading && videoList.length === 0" description="暂无视频资源" />
+        <el-empty v-if="!loading && videoList.length === 0" :description="$t('videos.empty')" />
       </div>
 
       <div class="panel-footer">

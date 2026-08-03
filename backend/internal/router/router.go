@@ -37,6 +37,9 @@ func SetupRouter(cfg *bootstrap.AppConfigHTTP) *gin.Engine {
 	// 注册运行时配置路由
 	RegisterSettingRouter(r)
 
+	// 注册组件管理路由
+	RegisterComponentRouter(r)
+
 	// 兜底 404
 	r.NoRoute(func(c *gin.Context) {
 		response.Fail(c, 10040401, "接口不存在", http.StatusNotFound)

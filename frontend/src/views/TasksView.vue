@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { useI18n } from 'vue-i18n'
 import { listTasks, retryTask, deleteTask } from '@/api/task'
 import type { Task, TaskType } from '@/api/task'
 import { formatTime } from '@/utils/format'
 
+const { t } = useI18n()
 const loading = ref<boolean>(false)
 const taskList = ref<Task[]>([])
 const activeType = ref<TaskType | ''>('')
@@ -38,7 +40,7 @@ function handleTypeChange(type: TaskType | ''): void {
 async function handleRetry(task: Task): Promise<void> {
   try {
     await retryTask(task.id)
-    ElMessage.success('任务已重新提交')
+    ElMessage.success(t('tasks.retry.success'))
     await loadTasks()
   } catch {
     // 失败已由拦截器提示
@@ -47,13 +49,13 @@ async function handleRetry(task: Task): Promise<void> {
 
 async function handleDelete(task: Task): Promise<void> {
   try {
-    await ElMessageBox.confirm(`确定删除该任务吗？`, '提示', {
-      confirmButtonText: '确定',
-      cancelButtonText: '取消',
-      type: 'warning',
-    })
+    await ElMessageBox.confirm(
+      t('tasks.delete.confirm'),
+      t('common.notice'),
+      { confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel'), type: 'warning' }
+    )
     await deleteTask(task.id)
-    ElMessage.success('删除成功')
+    ElMessage.success(t('tasks.delete.success'))
     await loadTasks()
   } catch (error) {
     if (error !== 'cancel') {
@@ -79,18 +81,18 @@ function statusType(status: string): '' | 'success' | 'danger' | 'warning' | 'in
 
 function statusText(status: string): string {
   const map: Record<string, string> = {
-    pending: '待处理',
-    running: '进行中',
-    completed: '已完成',
-    failed: '失败',
+    pending: t('tasks.status.pending'),
+    running: t('tasks.status.running'),
+    completed: t('tasks.status.completed'),
+    failed: t('tasks.status.failed'),
   }
   return map[status] || status
 }
 
 function typeText(type: string): string {
   const map: Record<string, string> = {
-    subtitle: '字幕',
-    repair: '修复',
+    subtitle: t('tasks.type.subtitle'),
+    repair: t('tasks.type.repair'),
   }
   return map[type] || type
 }
@@ -145,19 +147,19 @@ function stopPolling(): void {
       <div class="vf-panel-header">
         <div class="vf-panel-header__title">
           <span class="vf-led vf-led--cyan vf-led--pulse"></span>
-          <span>任务监控台</span>
-          <span class="header__count">{{ total }} 个任务</span>
+          <span>{{ $t('tasks.title') }}</span>
+          <span class="header__count">{{ $t('tasks.count', { count: total }) }}</span>
         </div>
 
         <div class="monitor-stats">
           <div class="stat stat--running">
             <span class="vf-led vf-led--amber vf-led--pulse"></span>
-            <span class="stat__label">运行中</span>
+            <span class="stat__label">{{ $t('tasks.running') }}</span>
             <span class="stat__value">{{ runningCount }}</span>
           </div>
           <div class="stat stat--failed">
             <span class="vf-led vf-led--red"></span>
-            <span class="stat__label">失败</span>
+            <span class="stat__label">{{ $t('tasks.failed') }}</span>
             <span class="stat__value">{{ failedCount }}</span>
           </div>
         </div>
@@ -165,40 +167,40 @@ function stopPolling(): void {
 
       <div class="panel-toolbar">
         <el-radio-group v-model="activeType" @change="handleTypeChange">
-          <el-radio-button label="">全部</el-radio-button>
-          <el-radio-button label="subtitle">字幕</el-radio-button>
-          <el-radio-button label="repair">修复</el-radio-button>
+          <el-radio-button label="">{{ $t('tasks.filter.all') }}</el-radio-button>
+          <el-radio-button label="subtitle">{{ $t('tasks.filter.subtitle') }}</el-radio-button>
+          <el-radio-button label="repair">{{ $t('tasks.filter.repair') }}</el-radio-button>
         </el-radio-group>
 
         <div class="toolbar-right">
           <div class="poll-indicator">
             <span class="vf-led vf-led--green vf-led--pulse"></span>
-            <span class="vf-data-label">轮询 2秒</span>
+            <span class="vf-data-label">{{ $t('tasks.polling') }}</span>
           </div>
           <el-button type="primary" @click="loadTasks">
-            <el-icon><Refresh /></el-icon>刷新
+            <el-icon><Refresh /></el-icon>{{ $t('tasks.refresh') }}
           </el-button>
         </div>
       </div>
 
       <div class="panel-body panel-body--compact">
         <el-table v-loading="loading" :data="taskList" style="width: 100%">
-          <el-table-column label="任务编号" width="130">
+          <el-table-column :label="$t('tasks.column.id')" width="130">
             <template #default="{ row }">
               <span class="task-id">#{{ row.id.slice(-8).toUpperCase() }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="视频名" min-width="200" show-overflow-tooltip>
+          <el-table-column :label="$t('tasks.column.video')" min-width="200" show-overflow-tooltip>
             <template #default="{ row }">
               {{ row.video?.name || row.video_id }}
             </template>
           </el-table-column>
-          <el-table-column label="类型" width="100">
+          <el-table-column :label="$t('tasks.column.type')" width="100">
             <template #default="{ row }">
               <el-tag :type="row.task_type === 'repair' ? 'warning' : 'primary'">{{ typeText(row.task_type) }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="状态" width="130">
+          <el-table-column :label="$t('tasks.column.status')" width="130">
             <template #default="{ row }">
               <div class="status-cell">
                 <span :class="['vf-led', statusLedClass(row.status)]"></span>
@@ -206,32 +208,32 @@ function stopPolling(): void {
               </div>
             </template>
           </el-table-column>
-          <el-table-column label="进度" min-width="240">
+          <el-table-column :label="$t('tasks.column.progress')" min-width="240">
             <template #default="{ row }">
               <el-progress :percentage="row.progress" :status="row.status === 'failed' ? 'exception' : row.status === 'completed' ? 'success' : ''" />
               <div v-if="row.progress_msg" class="progress-msg">{{ row.progress_msg }}</div>
             </template>
           </el-table-column>
-          <el-table-column label="错误信息" min-width="160" show-overflow-tooltip>
+          <el-table-column :label="$t('tasks.column.error')" min-width="160" show-overflow-tooltip>
             <template #default="{ row }">
               {{ row.error_msg || '-' }}
             </template>
           </el-table-column>
-          <el-table-column label="创建时间" width="170">
+          <el-table-column :label="$t('tasks.column.created')" width="170">
             <template #default="{ row }">
               {{ formatTime(row.created_at) }}
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="180" fixed="right">
+          <el-table-column :label="$t('tasks.column.action')" width="180" fixed="right">
             <template #default="{ row }">
               <el-button v-if="row.status === 'failed'" type="warning" size="small" @click="handleRetry(row)">
-                重试
+                {{ $t('tasks.btn.retry') }}
               </el-button>
-              <el-button v-if="row.status !== 'running'" type="danger" size="small" @click="handleDelete(row)">删除</el-button>
+              <el-button v-if="row.status !== 'running'" type="danger" size="small" @click="handleDelete(row)">{{ $t('tasks.btn.delete') }}</el-button>
             </template>
           </el-table-column>
           <template #empty>
-            <div class="empty-state">暂无任务数据</div>
+            <div class="empty-state">{{ $t('tasks.empty') }}</div>
           </template>
         </el-table>
       </div>

@@ -1,5 +1,8 @@
 import axios, { type AxiosInstance, type AxiosResponse } from 'axios'
 import { ElMessage } from 'element-plus'
+import { i18n } from '@/main'
+
+const t = i18n.global.t
 
 // 统一响应结构
 export interface ApiResponse<T = unknown> {
@@ -24,13 +27,13 @@ request.interceptors.response.use(
   (response: AxiosResponse<ApiResponse>) => {
     const res = response.data
     if (res.code !== 0) {
-      ElMessage.error(res.msg || '请求失败')
-      return Promise.reject(new Error(res.msg || '请求失败'))
+      ElMessage.error(res.msg || t('common.request_failed'))
+      return Promise.reject(new Error(res.msg || t('common.request_failed')))
     }
     return response
   },
   (error) => {
-    const msg = error.response?.data?.msg || error.message || '网络错误'
+    const msg = error.response?.data?.msg || error.message || t('common.network_error')
     ElMessage.error(msg)
     return Promise.reject(error)
   }
