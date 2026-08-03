@@ -50,7 +50,7 @@
 | **NAS / 家庭伺服器玩家** | Docker 長期掛著，定時掃描目錄自動入庫，新影片自動產生字幕 |
 | **想本地跑 Whisper 的人** | 不想寫腳本，Web 介面設定 ASR 參數（語言 / VAD / 提示詞）即可 |
 | **嫌命令列麻煩的人** | 全程圖形介面，設定、掃描、任務進度一目了然 |
-| **遠端 ffmpeg 使用者** | ffmpeg 支援 SSH 遠端模式，本地不裝 ffmpeg 也能用遠端機器處理 |
+| **本地化執行** | ffmpeg 自動智慧呼叫本地已安裝的 ffmpeg，無需額外配置 |
 
 ## ✨ 功能特性
 
@@ -60,7 +60,7 @@
 - **任務管理** - 建立 / 查詢 / 刪除 / 失敗重試，按類型過濾，即時進度條，前端 2 秒輪詢重新整理
 - **任務排程器** - 背景排程器按設定的並行數限制執行字幕 / 修復任務
 - **執行時設定** - 統一設定頁，所有設定線上修改並持久化（SQLite），儲存即熱生效
-- **FFmpeg 雙模式** - 本地直接呼叫，或透過 SSH 呼叫遠端 ffmpeg，執行時可熱切換
+- **FFmpeg 智慧呼叫** - 自動探測本地 ffmpeg，無需手動配置
 - **工程化** - `trace_id` 全鏈路追蹤、統一回應結構、zap 結構化日誌、優雅關閉（重啟時執行中任務自動標記失敗）
 
 ## 📥 快速開始
@@ -200,7 +200,7 @@ APP_HTTP_PORT=9090 go run ./cmd/api   # 後端
 | 設定 | [Viper](https://github.com/spf13/viper) | 設定檔 + 環境變數覆寫 |
 | 日誌 | [Zap](https://github.com/uber-go/zap) | 結構化日誌 |
 | ASR | [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice) | 語音辨識引擎 |
-| 音訊/影片 | [FFmpeg](https://ffmpeg.org/) / ffprobe | 音訊擷取、時長探測，支援本地 / SSH |
+| 音訊/影片 | [FFmpeg](https://ffmpeg.org/) / ffprobe | 音訊擷取、時長探測，智慧本地呼叫 |
 | 影片修復 | [`ladaapp/lada`](https://github.com/ladaapp/lada) | Docker 修復引擎 |
 | 前端 | [Vue 3](https://vuejs.org/) + [Element Plus](https://element-plus.org/) + [Vite](https://vite.dev/) | 圖形介面 |
 | 狀態管理 | [Pinia](https://pinia.vuejs.org/) | 前端狀態 |
@@ -377,7 +377,7 @@ videoFlow/
 
 ## 🛡️ 注意事項
 
-- **FFmpeg 必需**：`ffmpeg.provider` 預設 `local`，映像已內建 ffmpeg；本地原始碼執行需自行安裝，或切換為 `ssh` 遠端模式
+- **FFmpeg 必需**：`ffmpeg.provider` 固定為 `local`，映像已內建 ffmpeg；本地原始碼執行需自行安裝
 - **影片修復需 Docker**：容器部署時需掛載宿主機 Docker socket；不用該功能可忽略，不影響服務啟動
 - **ASR 服務需自備**：請自行部署 [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice)，並設定 `asr.url`
 - **資料庫持久化**：預設 `data/app.db`，Docker 部署時務必掛載 `/app/data` 目錄，否則重啟遺失資料
@@ -387,7 +387,7 @@ videoFlow/
 <details>
 <summary><b>啟動報 <code>ffmpeg not found</code> 怎麼辦？</b></summary>
 
-`ffmpeg.provider` 預設為 `local`，需要本地（或映像內）存在 ffmpeg。Docker 映像已內建；原始碼執行請安裝 ffmpeg，或在設定中切換為 `ssh` 遠端模式（填寫 SSH 主機資訊，後端透過 SSH 呼叫遠端 ffmpeg）。
+`ffmpeg.provider` 固定為 `local`，需要本地（或映像內）存在 ffmpeg。Docker 映像已內建；原始碼執行請自行安裝 ffmpeg。
 
 </details>
 
@@ -418,7 +418,7 @@ videoFlow/
 - ✅ 任務管理 + 即時進度 + 失敗重試
 - ✅ 執行時設定線上修改 + 持久化
 - ✅ Docker 部署 + 連接埠執行時指定
-- ✅ FFmpeg 本地 / SSH 雙模式
+- ✅ FFmpeg 智慧本地呼叫
 - 🔲 字幕線上預覽 / 編輯
 - 🔲 字幕檔案匯出下載
 - 🔲 多架構映像（arm64 原生支援）

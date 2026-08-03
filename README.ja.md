@@ -50,7 +50,7 @@ Whisper や FFmpeg を単体で使うのは難しくありませんが、「デ�
 | **NAS / ホームサーバー愛好家** | Docker で常時稼働させ、定期スキャンでディレクトリを自動取り込み、新規動画に自動で字幕を生成 |
 | **Whisper をローカルで動かしたい方** | スクリプトを書かずに、Web UI で ASR パラメータ（言語 / VAD / プロンプト）を設定するだけ |
 | **コマンドラインが面倒な方** | すべてグラフィカル UI で、設定、スキャン、タスク進捗がひと目で分かる |
-| **リモート ffmpeg ユーザー** | ffmpeg は SSH リモートモードに対応、ローカルに ffmpeg を入れなくてもリモートマシンで処理可能 |
+| **ローカルユーザー** | インストール済みの ffmpeg を自動的にインテリジェントに呼び出し、追加設定は不要 |
 
 ## ✨ 機能特性
 
@@ -60,7 +60,7 @@ Whisper や FFmpeg を単体で使うのは難しくありませんが、「デ�
 - **タスク管理** - 作成 / 照会 / 削除 / 失敗リトライ、タイプ別フィルタ、リアルタイムのプログレスバー、フロントエンドは 2 秒間隔でポーリング更新
 - **タスクスケジューラ** - バックグラウンドのスケジューラが設定された並行数制限に従って字幕 / 修復タスクを実行
 - **ランタイム設定** - 統合された設定ページ、すべての設定をオンラインで変更し永続化（SQLite）、保存すると即座にホット反映
-- **FFmpeg デュアルモード** - ローカルで直接呼び出し、または SSH 経由でリモート ffmpeg を呼び出し、実行時にホット切り替え可能
+- **FFmpeg スマート呼び出し** - ローカルの ffmpeg を自動検出し、手動設定不要
 - **エンジニアリング** - `trace_id` による全リンクトラッキング、統一レスポンス構造、zap による構造化ログ、グレースフルシャットダウン（再起動時に実行中タスクを自動的に失敗扱い）
 
 ## 📥 クイックスタート
@@ -200,7 +200,7 @@ APP_HTTP_PORT=9090 go run ./cmd/api   # 后端
 | 設定 | [Viper](https://github.com/spf13/viper) | 設定ファイル + 環境変数による上書き |
 | ログ | [Zap](https://github.com/uber-go/zap) | 構造化ログ |
 | ASR | [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice) | 音声認識エンジン |
-| 音声/動画 | [FFmpeg](https://ffmpeg.org/) / ffprobe | 音声抽出、再生時間の検出、ローカル / SSH に対応 |
+| 音声/動画 | [FFmpeg](https://ffmpeg.org/) / ffprobe | 音声抽出、再生時間の検出、スマートローカル呼び出し |
 | 動画修復 | [`ladaapp/lada`](https://github.com/ladaapp/lada) | Docker 修復エンジン |
 | フロントエンド | [Vue 3](https://vuejs.org/) + [Element Plus](https://element-plus.org/) + [Vite](https://vite.dev/) | グラフィカル UI |
 | 状態管理 | [Pinia](https://pinia.vuejs.org/) | フロントエンドの状態 |
@@ -356,7 +356,7 @@ videoFlow/
 │   │   ├── dto/              # リクエスト/レスポンス DTO
 │   │   ├── router/           # ルーティング登録
 │   │   ├── asr/              # ASR クライアント
-│   │   ├── ffmpeg/           # FFmpeg ローカル/SSH 実行器
+│   │   ├── ffmpeg/           # FFmpeg ローカル実行器
 │   │   ├── repair/               # 動画修復実行器
 │   │   ├── subtitle/         # 字幕パース
 │   │   ├── scanner/          # 動画ディレクトリスキャナ
@@ -377,7 +377,7 @@ videoFlow/
 
 ## 🛡️ 注意事項
 
-- **FFmpeg は必須**：`ffmpeg.provider` のデフォルトは `local`、イメージに ffmpeg が内蔵されています。ローカルでソースから実行する場合は各自でインストールするか、`ssh` リモートモードに切り替えてください
+- **FFmpeg は必須**：`ffmpeg.provider` は `local` 固定、イメージに ffmpeg が内蔵されています。ローカルでソースから実行する場合は各自でインストールしてください
 - **動画修復には Docker が必要**：コンテナデプロイ時にホストマシンの Docker socket をマウントする必要があります。この機能を使わない場合は無視でき、サービスの起動には影響しません
 - **ASR サービスは各自で用意**：[Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice) をご自身でデプロイし、`asr.url` を設定してください
 - **データベースの永続化**：デフォルトは `data/app.db`、Docker デプロイ時は必ず `/app/data` ディレクトリをマウントしてください。そうしないと再起動でデータが失われます
@@ -387,7 +387,7 @@ videoFlow/
 <details>
 <summary><b>起動時に <code>ffmpeg not found</code> と出る場合は？</b></summary>
 
-`ffmpeg.provider` のデフォルトは `local` で、ローカル（またはイメージ内）に ffmpeg が存在する必要があります。Docker イメージにはすでに内蔵されています。ソースから実行する場合は ffmpeg をインストールするか、設定で `ssh` リモートモードに切り替えてください（SSH ホスト情報を入力すると、バックエンドが SSH 経由でリモート ffmpeg を呼び出します）。
+`ffmpeg.provider` は `local` 固定で、ローカル（またはイメージ内）に ffmpeg が存在する必要があります。Docker イメージにはすでに内蔵されています。ソースから実行する場合は ffmpeg をインストールしてください。
 
 </details>
 
@@ -418,7 +418,7 @@ videoFlow/
 - ✅ タスク管理 + リアルタイム進捗 + 失敗リトライ
 - ✅ ランタイム設定のオンライン変更 + 永続化
 - ✅ Docker デプロイ + 実行時のポート指定
-- ✅ FFmpeg ローカル / SSH デュアルモード
+- ✅ FFmpeg スマートローカル呼び出し
 - 🔲 字幕のオンラインプレビュー / 編集
 - 🔲 字幕ファイルのエクスポート/ダウンロード
 - 🔲 マルチアーキテクチャイメージ（arm64 ネイティブサポート）

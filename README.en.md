@@ -50,7 +50,7 @@ Under the hood it reuses the recognition power of [Whisper ASR Webservice](https
 | **NAS / home server enthusiasts** | Keep Docker running long-term, periodically scan directories to auto-import, and auto-generate subtitles for new videos |
 | **People who want to run Whisper locally** | No scripts needed—configure ASR parameters (language / VAD / prompt) via the Web UI |
 | **People who find the CLI cumbersome** | Fully graphical—config, scanning, and task progress at a glance |
-| **Remote ffmpeg users** | ffmpeg supports an SSH remote mode—process on a remote machine without installing ffmpeg locally |
+| **Local users** | ffmpeg is automatically and intelligently called from your local installation, no extra configuration needed |
 
 ## ✨ Features
 
@@ -60,7 +60,7 @@ Under the hood it reuses the recognition power of [Whisper ASR Webservice](https
 - **Task management** - Create / query / delete / retry-on-failure, filter by type, real-time progress bar, 2-second polling refresh on the frontend
 - **Task scheduler** - A background scheduler runs subtitle / repair tasks within configured concurrency limits
 - **Runtime configuration** - Unified settings page, all config editable online and persisted (SQLite), hot-reload on save
-- **FFmpeg dual mode** - Call locally, or invoke a remote ffmpeg over SSH, hot-switchable at runtime
+- **Smart FFmpeg invocation** - Automatically detects local ffmpeg, no manual configuration needed
 - **Engineering** - `trace_id` end-to-end tracing, unified response structure, zap structured logging, graceful shutdown (running tasks auto-marked as failed on restart)
 
 ## 📥 Quick Start
@@ -356,7 +356,7 @@ videoFlow/
 │   │   ├── dto/              # Request/response DTOs
 │   │   ├── router/           # Route registration
 │   │   ├── asr/              # ASR client
-│   │   ├── ffmpeg/           # FFmpeg local/SSH executor
+│   │   ├── ffmpeg/           # FFmpeg local executor
 │   │   ├── repair/           # Video repair executor
 │   │   ├── subtitle/         # Subtitle parsing
 │   │   ├── scanner/          # Video directory scanner
@@ -377,7 +377,7 @@ videoFlow/
 
 ## 🛡️ Notes
 
-- **FFmpeg required**: `ffmpeg.provider` defaults to `local`; the image has ffmpeg built in. When running from source locally, install it yourself or switch to `ssh` remote mode.
+- **FFmpeg required**: `ffmpeg.provider` is fixed to `local`; the Docker image has ffmpeg built in. When running from source, install it yourself.
 - **Video repair needs Docker**: When deploying in a container, mount the host Docker socket. If you don't use this feature, you can ignore it-it won't affect service startup.
 - **Bring your own ASR service**: Deploy [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice) yourself and configure `asr.url`.
 - **Database persistence**: Defaults to `data/app.db`. When deploying with Docker, be sure to mount the `/app/data` directory, or data will be lost on restart.
@@ -418,7 +418,7 @@ Defaults to `data/app.db` (SQLite). When deploying with Docker, mount the `/app/
 - ✅ Task management + real-time progress + failure retry
 - ✅ Online runtime config editing + persistence
 - ✅ Docker deployment + runtime port specification
-- ✅ FFmpeg local / SSH dual mode
+- ✅ FFmpeg smart local invocation
 - 🔲 Subtitle online preview / editing
 - 🔲 Subtitle file export & download
 - 🔲 Multi-architecture images (native arm64 support)

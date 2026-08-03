@@ -50,7 +50,7 @@
 | **NAS / 家庭服务器玩家** | Docker 长期挂着，定时扫描目录自动入库，新视频自动生成字幕 |
 | **想本地跑 Whisper 的人** | 不想写脚本，Web 界面配置 ASR 参数（语言 / VAD / 提示词）即可 |
 | **嫌命令行麻烦的人** | 全程图形界面，配置、扫描、任务进度一目了然 |
-| **远程 ffmpeg 用户** | ffmpeg 支持 SSH 远程模式，本地不装 ffmpeg 也能用远程机器处理 |
+| **本地化运行** | ffmpeg 自动智能调用本地已安装的 ffmpeg，无需额外配置 |
 
 ## ✨ 功能特性
 
@@ -60,7 +60,7 @@
 - **任务管理** - 创建 / 查询 / 删除 / 失败重试，按类型过滤，实时进度条，前端 2 秒轮询刷新
 - **任务调度器** - 后台调度器按配置的并发数限制执行字幕 / 修复任务
 - **运行时配置** - 统一配置页，所有配置在线修改并持久化（SQLite），保存即热生效
-- **FFmpeg 双模式** - 本地直接调用，或通过 SSH 调用远程 ffmpeg，运行时可热切换
+- **FFmpeg 智能调用** - 自动探测本地 ffmpeg，无需手动配置
 - **工程化** - `trace_id` 全链路追踪、统一响应结构、zap 结构化日志、优雅关闭（重启时运行中任务自动标记失败）
 
 ## 📥 快速开始
@@ -200,7 +200,7 @@ APP_HTTP_PORT=9090 go run ./cmd/api   # 后端
 | 配置 | [Viper](https://github.com/spf13/viper) | 配置文件 + 环境变量覆盖 |
 | 日志 | [Zap](https://github.com/uber-go/zap) | 结构化日志 |
 | ASR | [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice) | 语音识别引擎 |
-| 音视频 | [FFmpeg](https://ffmpeg.org/) / ffprobe | 音频提取、时长探测，支持本地 / SSH |
+| 音视频 | [FFmpeg](https://ffmpeg.org/) / ffprobe | 音频提取、时长探测，智能本地调用 |
 | 视频修复 | [`ladaapp/lada`](https://github.com/ladaapp/lada) | Docker 修复引擎 |
 | 前端 | [Vue 3](https://vuejs.org/) + [Element Plus](https://element-plus.org/) + [Vite](https://vite.dev/) | 图形界面 |
 | 状态管理 | [Pinia](https://pinia.vuejs.org/) | 前端状态 |
@@ -356,7 +356,7 @@ videoFlow/
 │   │   ├── dto/              # 请求/响应 DTO
 │   │   ├── router/           # 路由注册
 │   │   ├── asr/              # ASR 客户端
-│   │   ├── ffmpeg/           # FFmpeg 本地/SSH 执行器
+│   │   ├── ffmpeg/           # FFmpeg 本地执行器
 │   │   ├── repair/           # 视频修复执行器
 │   │   ├── subtitle/         # 字幕解析
 │   │   ├── scanner/          # 视频目录扫描器
@@ -377,7 +377,7 @@ videoFlow/
 
 ## 🛡️ 注意事项
 
-- **FFmpeg 必需**：`ffmpeg.provider` 默认 `local`，镜像已内置 ffmpeg；本地源码运行需自行安装，或切换为 `ssh` 远程模式
+- **FFmpeg 必需**：`ffmpeg.provider` 固定为 `local`，镜像已内置 ffmpeg；本地源码运行需自行安装
 - **视频修复需 Docker**：容器部署时需挂载宿主机 Docker socket；不用该功能可忽略，不影响服务启动
 - **ASR 服务需自备**：请自行部署 [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice)，并配置 `asr.url`
 - **数据库持久化**：默认 `data/app.db`，Docker 部署时务必挂载 `/app/data` 目录，否则重启丢数据
@@ -387,7 +387,7 @@ videoFlow/
 <details>
 <summary><b>启动报 <code>ffmpeg not found</code> 怎么办？</b></summary>
 
-`ffmpeg.provider` 默认为 `local`，需要本地（或镜像内）存在 ffmpeg。Docker 镜像已内置；源码运行请安装 ffmpeg，或在配置中切换为 `ssh` 远程模式（填写 SSH 主机信息，后端通过 SSH 调用远程 ffmpeg）。
+`ffmpeg.provider` 固定为 `local`，需要本地（或镜像内）存在 ffmpeg。Docker 镜像已内置；源码运行请自行安装 ffmpeg。
 
 </details>
 
@@ -418,7 +418,7 @@ videoFlow/
 - ✅ 任务管理 + 实时进度 + 失败重试
 - ✅ 运行时配置在线修改 + 持久化
 - ✅ Docker 部署 + 端口运行时指定
-- ✅ FFmpeg 本地 / SSH 双模式
+- ✅ FFmpeg 智能本地调用
 - 🔲 字幕在线预览 / 编辑
 - 🔲 字幕文件导出下载
 - 🔲 多架构镜像（arm64 原生支持）
