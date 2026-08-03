@@ -38,7 +38,7 @@
 | 配置修改 | 改配置文件、重启服务 | 在线修改，保存即热生效，持久化到数据库 |
 | 部署形态 | 一堆依赖要装 | Docker 单镜像，挂载配置即跑 |
 
-底层复用 [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice) 的识别能力、[FFmpeg](https://ffmpeg.org/) 的音视频处理、[`ladaapp/lada`](https://hub.docker.com/r/ladaapp/lada) 的视频修复，在其之上封装出 HTTP API 与 Web 前端 —— **命令行的能力，图形界面的体验**。
+底层复用 [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice) 的识别能力、[FFmpeg](https://ffmpeg.org/) 的音视频处理、[`ladaapp/lada`](https://github.com/ladaapp/lada) 的视频修复，在其之上封装出 HTTP API 与 Web 前端 —— **命令行的能力，图形界面的体验**。
 
 ## 🎯 谁会想用
 
@@ -56,7 +56,7 @@
 
 - **视频目录扫描** - 手动扫描或后台定时自动扫描，视频自动入库，卡片式分页展示
 - **字幕生成** - 基于 Whisper ASR，支持语言、VAD 过滤、任务类型、音频预编码、初始提示词、词级时间戳、多种输出格式（json / srt / vtt / txt / tsv）
-- **视频修复** - 基于 Docker 镜像 `ladaapp/lada`，支持 CPU / NVIDIA CUDA / Apple MPS / Intel XPU 四种计算设备
+- **视频修复** - 基于 Docker 镜像 `ladaapp/lada`，支持 x86_64 CPU 以及 NVIDIA CUDA 显卡（Turing 系列或更高版本，包括 RTX 20xx 到 RTX 50xx 系列）
 - **任务管理** - 创建 / 查询 / 删除 / 失败重试，按类型过滤，实时进度条，前端 2 秒轮询刷新
 - **任务调度器** - 后台调度器按配置的并发数限制执行字幕 / 修复任务
 - **运行时配置** - 统一配置页，所有配置在线修改并持久化（SQLite），保存即热生效
@@ -71,7 +71,7 @@
 
 - 检测 Docker 环境
 - 部署 [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice)（支持 CPU/GPU、引擎与模型选择）
-- 拉取 [`ladaapp/lada`](https://hub.docker.com/r/ladaapp/lada) 视频修复镜像
+- 拉取 [`ladaapp/lada`](https://github.com/ladaapp/lada) 视频修复镜像
 - 安装 [FFmpeg](https://ffmpeg.org/)（支持 macOS / Linux / Windows）
 - 引导配置并启动本项目容器
 
@@ -201,7 +201,7 @@ APP_HTTP_PORT=9090 go run ./cmd/api   # 后端
 | 日志 | [Zap](https://github.com/uber-go/zap) | 结构化日志 |
 | ASR | [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice) | 语音识别引擎 |
 | 音视频 | [FFmpeg](https://ffmpeg.org/) / ffprobe | 音频提取、时长探测，支持本地 / SSH |
-| 视频修复 | [`ladaapp/lada`](https://hub.docker.com/r/ladaapp/lada) | Docker 修复引擎 |
+| 视频修复 | [`ladaapp/lada`](https://github.com/ladaapp/lada) | Docker 修复引擎 |
 | 前端 | [Vue 3](https://vuejs.org/) + [Element Plus](https://element-plus.org/) + [Vite](https://vite.dev/) | 图形界面 |
 | 状态管理 | [Pinia](https://pinia.vuejs.org/) | 前端状态 |
 | HTTP 客户端 | [Axios](https://axios-http.com/) | 接口请求 |
@@ -429,7 +429,7 @@ videoFlow/
 
 - **[Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice)** - by [@ahmetoner](https://github.com/ahmetoner)，基于 OpenAI Whisper 的 ASR HTTP 服务，VideoFlow 的语音识别能力全部基于此。
 - **[FFmpeg](https://ffmpeg.org/)** - 强大的音视频处理工具，负责音频提取与时长探测。
-- **[ladaapp/lada](https://hub.docker.com/r/ladaapp/lada)** - 视频修复 Docker 镜像。
+- **[ladaapp/lada](https://github.com/ladaapp/lada)** - 视频修复 Docker 镜像。
 - **[Gin](https://github.com/gin-gonic/gin)** / **[GORM](https://github.com/go-gorm/gorm)** / **[Viper](https://github.com/spf13/viper)** / **[Zap](https://github.com/uber-go/zap)** - 优秀的 Go 基础库。
 - **[Vue 3](https://vuejs.org/)** / **[Element Plus](https://element-plus.org/)** / **[Vite](https://vite.dev/)** - 前端基石。
 

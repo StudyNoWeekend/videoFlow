@@ -38,7 +38,7 @@ Whisper や FFmpeg を単体で使うのは難しくありませんが、「デ�
 | 設定変更 | 設定ファイルを編集、サービスを再起動 | オンラインで変更、保存すると即座にホット反映、データベースに永続化 |
 | デプロイ形態 | 多くの依存パッケージをインストール | Docker シングルイメージ、設定をマウントするだけで実行 |
 
-基盤として [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice) の認識能力、[FFmpeg](https://ffmpeg.org/) の音声/動画処理、[`ladaapp/lada`](https://hub.docker.com/r/ladaapp/lada) の動画修復を再利用し、その上に HTTP API と Web フロントエンドをラップしています -- **コマンドラインの能力を、グラフィカル UI の体験で**。
+基盤として [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice) の認識能力、[FFmpeg](https://ffmpeg.org/) の音声/動画処理、[`ladaapp/lada`](https://github.com/ladaapp/lada) の動画修復を再利用し、その上に HTTP API と Web フロントエンドをラップしています -- **コマンドラインの能力を、グラフィカル UI の体験で**。
 
 ## 🎯 こんな方におすすめ
 
@@ -56,7 +56,7 @@ Whisper や FFmpeg を単体で使うのは難しくありませんが、「デ�
 
 - **動画ディレクトリスキャン** - 手動スキャンまたはバックグラウンドでの定期自動スキャン、動画を自動で取り込み、カード型のページング表示
 - **字幕生成** - Whisper ASR ベース、言語、VAD フィルタ、タスクタイプ、音声の事前エンコード、初期プロンプト、単語レベルのタイムスタンプ、複数の出力形式（json / srt / vtt / txt / tsv）に対応
-- **動画修復** - Docker イメージ `ladaapp/lada` ベース、CPU / NVIDIA CUDA / Apple MPS / Intel XPU の 4 種類の計算デバイスに対応
+- **動画修復** - Docker イメージ `ladaapp/lada` ベース、x86_64 CPU および NVIDIA CUDA GPU（Turing シリーズ以降、RTX 20xx ～ RTX 50xx シリーズ）に対応
 - **タスク管理** - 作成 / 照会 / 削除 / 失敗リトライ、タイプ別フィルタ、リアルタイムのプログレスバー、フロントエンドは 2 秒間隔でポーリング更新
 - **タスクスケジューラ** - バックグラウンドのスケジューラが設定された並行数制限に従って字幕 / 修復タスクを実行
 - **ランタイム設定** - 統合された設定ページ、すべての設定をオンラインで変更し永続化（SQLite）、保存すると即座にホット反映
@@ -71,7 +71,7 @@ Whisper や FFmpeg を単体で使うのは難しくありませんが、「デ�
 
 - Docker 環境の検出
 - [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice) のデプロイ（CPU/GPU、エンジンとモデルの選択に対応）
-- [`ladaapp/lada`](https://hub.docker.com/r/ladaapp/lada) 動画修復イメージのプル
+- [`ladaapp/lada`](https://github.com/ladaapp/lada) 動画修復イメージのプル
 - [FFmpeg](https://ffmpeg.org/) のインストール（macOS / Linux / Windows に対応）
 - 設定のガイドとプロジェクトコンテナの起動
 
@@ -201,7 +201,7 @@ APP_HTTP_PORT=9090 go run ./cmd/api   # 后端
 | ログ | [Zap](https://github.com/uber-go/zap) | 構造化ログ |
 | ASR | [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice) | 音声認識エンジン |
 | 音声/動画 | [FFmpeg](https://ffmpeg.org/) / ffprobe | 音声抽出、再生時間の検出、ローカル / SSH に対応 |
-| 動画修復 | [`ladaapp/lada`](https://hub.docker.com/r/ladaapp/lada) | Docker 修復エンジン |
+| 動画修復 | [`ladaapp/lada`](https://github.com/ladaapp/lada) | Docker 修復エンジン |
 | フロントエンド | [Vue 3](https://vuejs.org/) + [Element Plus](https://element-plus.org/) + [Vite](https://vite.dev/) | グラフィカル UI |
 | 状態管理 | [Pinia](https://pinia.vuejs.org/) | フロントエンドの状態 |
 | HTTP クライアント | [Axios](https://axios-http.com/) | API リクエスト |
@@ -429,7 +429,7 @@ videoFlow/
 
 - **[Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice)** - by [@ahmetoner](https://github.com/ahmetoner)、OpenAI Whisper ベースの ASR HTTP サービス。VideoFlow の音声認識能力はすべてこれに基づいています。
 - **[FFmpeg](https://ffmpeg.org/)** - 強力な音声/動画処理ツール。音声の抽出と再生時間の検出を担います。
-- **[ladaapp/lada](https://hub.docker.com/r/ladaapp/lada)** - 動画修復 Docker イメージ。
+- **[ladaapp/lada](https://github.com/ladaapp/lada)** - 動画修復 Docker イメージ。
 - **[Gin](https://github.com/gin-gonic/gin)** / **[GORM](https://github.com/go-gorm/gorm)** / **[Viper](https://github.com/spf13/viper)** / **[Zap](https://github.com/uber-go/zap)** - 優秀な Go 基盤ライブラリ。
 - **[Vue 3](https://vuejs.org/)** / **[Element Plus](https://element-plus.org/)** / **[Vite](https://vite.dev/)** - フロントエンドの基盤。
 

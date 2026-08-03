@@ -38,7 +38,7 @@ Using Whisper or FFmpeg alone isn't hard, but chaining "scan directory -> extrac
 | Configuration changes | Edit config file, restart service | Edit online, hot-reload on save, persisted to database |
 | Deployment | A pile of dependencies to install | Single Docker image, mount config and run |
 
-Under the hood it reuses the recognition power of [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice), the audio/video processing of [FFmpeg](https://ffmpeg.org/), and the video repair of [`ladaapp/lada`](https://hub.docker.com/r/ladaapp/lada), wrapping them with an HTTP API and Web frontend -- **the power of the command line, the experience of a graphical UI**.
+Under the hood it reuses the recognition power of [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice), the audio/video processing of [FFmpeg](https://ffmpeg.org/), and the video repair of [`ladaapp/lada`](https://github.com/ladaapp/lada), wrapping them with an HTTP API and Web frontend -- **the power of the command line, the experience of a graphical UI**.
 
 ## 🎯 Who Is This For
 
@@ -56,7 +56,7 @@ Under the hood it reuses the recognition power of [Whisper ASR Webservice](https
 
 - **Video directory scanning** - Manual scan or background scheduled auto-scan, videos auto-imported, paginated card display
 - **Subtitle generation** - Based on Whisper ASR, supports language, VAD filter, task type, audio pre-encoding, initial prompt, word-level timestamps, and multiple output formats (json / srt / vtt / txt / tsv)
-- **Video repair** - Based on the `ladaapp/lada` Docker image, supports four compute devices: CPU / NVIDIA CUDA / Apple MPS / Intel XPU
+- **Video repair** - Based on the `ladaapp/lada` Docker image, supports x86_64 CPU and NVIDIA CUDA GPUs (Turing series or higher, RTX 20xx to RTX 50xx)
 - **Task management** - Create / query / delete / retry-on-failure, filter by type, real-time progress bar, 2-second polling refresh on the frontend
 - **Task scheduler** - A background scheduler runs subtitle / repair tasks within configured concurrency limits
 - **Runtime configuration** - Unified settings page, all config editable online and persisted (SQLite), hot-reload on save
@@ -71,7 +71,7 @@ The project provides an [`install.en.sh`](./install.en.sh) one-click installer t
 
 - Detects the Docker environment
 - Deploys [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice) (supports CPU/GPU, engine and model selection)
-- Pulls the [`ladaapp/lada`](https://hub.docker.com/r/ladaapp/lada) video repair image
+- Pulls the [`ladaapp/lada`](https://github.com/ladaapp/lada) video repair image
 - Installs [FFmpeg](https://ffmpeg.org/) (supports macOS / Linux / Windows)
 - Guides you through config and starts the project container
 
@@ -201,7 +201,7 @@ Open the local address Vite prints in your browser.
 | Logging | [Zap](https://github.com/uber-go/zap) | Structured logging |
 | ASR | [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice) | Speech recognition engine |
 | Audio/Video | [FFmpeg](https://ffmpeg.org/) / ffprobe | Audio extraction, duration probing, local / SSH |
-| Video repair | [`ladaapp/lada`](https://hub.docker.com/r/ladaapp/lada) | Docker repair engine |
+| Video repair | [`ladaapp/lada`](https://github.com/ladaapp/lada) | Docker repair engine |
 | Frontend | [Vue 3](https://vuejs.org/) + [Element Plus](https://element-plus.org/) + [Vite](https://vite.dev/) | Graphical UI |
 | State management | [Pinia](https://pinia.vuejs.org/) | Frontend state |
 | HTTP client | [Axios](https://axios-http.com/) | API requests |
@@ -429,7 +429,7 @@ This project stands on the shoulders of giants. Special thanks to the following 
 
 - **[Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice)** - by [@ahmetoner](https://github.com/ahmetoner), an ASR HTTP service based on OpenAI Whisper. VideoFlow's speech recognition is built entirely on this.
 - **[FFmpeg](https://ffmpeg.org/)** - A powerful audio/video processing tool, responsible for audio extraction and duration probing.
-- **[ladaapp/lada](https://hub.docker.com/r/ladaapp/lada)** - The video repair Docker image.
+- **[ladaapp/lada](https://github.com/ladaapp/lada)** - The video repair Docker image.
 - **[Gin](https://github.com/gin-gonic/gin)** / **[GORM](https://github.com/go-gorm/gorm)** / **[Viper](https://github.com/spf13/viper)** / **[Zap](https://github.com/uber-go/zap)** - Excellent Go foundation libraries.
 - **[Vue 3](https://vuejs.org/)** / **[Element Plus](https://element-plus.org/)** / **[Vite](https://vite.dev/)** - The frontend foundation.
 
