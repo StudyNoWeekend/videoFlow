@@ -21,7 +21,9 @@ FROM golang:1.25-alpine AS backend-builder
 
 # CGO 依赖：gorm 的 sqlite 驱动基于 mattn/go-sqlite3，需要 gcc + musl-dev
 # git：go mod download 拉取部分依赖时需要
-RUN apk add --no-cache gcc musl-dev git
+# 使用国内镜像加速 apk
+RUN sed -i 's|dl-cdn.alpinelinux.org|mirrors.ustc.edu.cn|g' /etc/apk/repositories && \
+    apk add --no-cache gcc musl-dev git
 
 # CGO_ENABLED=1 以链接 sqlite 驱动
 # 不固定 GOARCH，由 buildx --platform 自动注入 TARGETARCH
@@ -49,7 +51,9 @@ FROM alpine:3.20
 #  - tzdata：时区
 #  - nginx：前端静态资源服务 + 反向代理 /api 到后端
 #  - docker-cli：调用宿主机 Docker（需挂载 /var/run/docker.sock）
-RUN apk add --no-cache ffmpeg openssh-client ca-certificates tzdata nginx docker-cli
+# 使用国内镜像加速 apk（ffmpeg 依赖较多，镜像加速明显）
+RUN sed -i 's|dl-cdn.alpinelinux.org|mirrors.ustc.edu.cn|g' /etc/apk/repositories && \
+    apk add --no-cache ffmpeg openssh-client ca-certificates tzdata nginx docker-cli
 
 WORKDIR /app
 
