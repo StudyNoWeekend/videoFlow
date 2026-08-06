@@ -1,6 +1,10 @@
 # ====== 阶段 1：构建前端 ======
 FROM node:22-alpine AS frontend-builder
 
+# 前端构建参数（仅构建阶段生效，不影响运行时）
+ARG VITE_API_BASE_URL=/api
+ARG VITE_APP_TITLE=VideoFlow
+
 WORKDIR /frontend
 
 # 先拷贝依赖清单，利用层缓存
@@ -44,7 +48,8 @@ FROM alpine:3.20
 #  - ca-certificates：调用 ASR 等 HTTPS 服务
 #  - tzdata：时区
 #  - nginx：前端静态资源服务 + 反向代理 /api 到后端
-RUN apk add --no-cache ffmpeg openssh-client ca-certificates tzdata nginx
+#  - docker-cli：调用宿主机 Docker（需挂载 /var/run/docker.sock）
+RUN apk add --no-cache ffmpeg openssh-client ca-certificates tzdata nginx docker-cli
 
 WORKDIR /app
 

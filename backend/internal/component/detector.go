@@ -121,7 +121,7 @@ func (d *Detector) detectWhisperASR(ctx context.Context) ComponentInfo {
 		NeedsDocker: true,
 	}
 
-	// Check if container exists and is running
+	// Check if the whisper-asr container exists and is running
 	out, err := runCommand(ctx, "docker", "ps", "--filter", "name=whisper-asr-webservice", "--format", "{{.ID}}")
 	if err != nil || strings.TrimSpace(out) == "" {
 		info.Status = StatusMissing
@@ -133,14 +133,6 @@ func (d *Detector) detectWhisperASR(ctx context.Context) ComponentInfo {
 	if err != nil || !strings.HasPrefix(strings.ToLower(strings.TrimSpace(statusOut)), "up") {
 		info.Status = StatusError
 		info.ErrorMsg = "Container is not running"
-		return info
-	}
-
-	// Verify by curling the service endpoint
-	curlOut, err := runCommand(ctx, "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "http://localhost:9000/docs", "--connect-timeout", "5")
-	if err != nil || strings.TrimSpace(curlOut) != "200" {
-		info.Status = StatusError
-		info.ErrorMsg = "Service is not responding"
 		return info
 	}
 
