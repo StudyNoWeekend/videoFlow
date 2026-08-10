@@ -3,8 +3,11 @@ package component
 import (
 	"context"
 	"fmt"
+	"os/exec"
 	"runtime"
 	"strings"
+
+	"video-captions/internal/utils"
 )
 
 func installFFmpeg(ctx context.Context, sessionID string, params InstallParams, events chan<- ProgressEvent) error {
@@ -13,6 +16,37 @@ func installFFmpeg(ctx context.Context, sessionID string, params InstallParams, 
 	osName := runtime.GOOS
 	sendEvent(sessionID, events, "install.start", fmt.Sprintf("Detected OS: %s", osName), "running")
 
+	// ====== Docker 容器环境特殊处理 ======
+	// 容器内 FFmpeg 已在 Dockerfile 中预装（apk add ffmpeg），
+	// 如果用户手动触发安装直接在容器内提示即可。
+	if utils.IsRunningInContainer() {
+		sendEvent(sessionID, events, "install.start", "当前运行在 Docker 容器中", "running")
+
+		// 检查 ffmpeg 是否已在容器内可用（Dockerfile 已预装）
+		if _, err := exec.LookPath("ffmpeg"); err == nil {
+			// 获取版本信息
+			version, verErr := runCommand(ctx, "ffmpeg", "-version")
+			if verErr == nil {
+				ver := parseFFmpegVersion(version)
+				sendEvent(sessionID, events, "install.verifying",
+					fmt.Sprintf("FFmpeg 已预装在镜像中版本: %s，无需额外安装", ver), "running")
+			} else {
+				sendEvent(sessionID, events, "install.verifying",
+					"FFmpeg 已预装在镜像中，无需额外安装", "running")
+			}
+
+			sendEvent(sessionID, events, "install.completed",
+				"FFmpeg 已预装于 VideoFlow Docker 镜像内，请直接使用。如需升级 FFmpeg，请拉取最新镜像。", "completed")
+			return nil
+		}
+
+		// 容器内未找到 ffmpeg（理论上不应发生，因为 Dockerfile 已安装）
+		sendEvent(sessionID, events, "install.start", "", "failed")
+		return fmt.Errorf("当前运行在 Docker 容器中，但未检测到 ffmpeg。" +
+			"请确认使用的是最新版本的 videoflow 镜像，" +
+			"或通过 docker exec -it <容器名> apk add ffmpeg 手动安装")
+	}
+
 	select {
 	case <-ctx.Done():
 		sendEvent(sessionID, events, "install.cancelled", "Installation cancelled", "failed")
@@ -20,7 +54,7 @@ func installFFmpeg(ctx context.Context, sessionID string, params InstallParams, 
 	default:
 	}
 
-	// Step 2: Install via package manager
+	// Step 2: Install via package manager（宿主机环境）
 	var installCmd string
 	var installArgs []string
 

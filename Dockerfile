@@ -79,6 +79,9 @@ COPY backend/config/config.yaml.local /app/config/config.yaml
 #  - /app/logs：日志
 VOLUME ["/app/config", "/app/data", "/app/logs"]
 
+# 标识当前运行环境为 Docker 容器，业务代码据此判断是否在容器内部运行
+ENV CONTAINER_RUNTIME=docker
+
 # 后端端口固定 8080（容器内部，不暴露）。
 # 仅暴露 nginx 的 80 端口（前端），docker run 时用 -p <宿主端口>:80 指定。
 EXPOSE 80

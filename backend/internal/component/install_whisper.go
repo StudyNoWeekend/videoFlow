@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"video-captions/internal/utils"
 )
 
 func installWhisper(ctx context.Context, sessionID string, params InstallParams, events chan<- ProgressEvent) error {
@@ -98,6 +100,22 @@ func installWhisper(ctx context.Context, sessionID string, params InstallParams,
 	// Step 4: Wait for service ready
 	sendEvent(sessionID, events, "install.waiting", "Waiting for service to be ready...", "running")
 
+	// 计算 Whisper ASR 服务的健康检查地址：
+	// - 宿主机部署时，容器端口映射到 localhost:9000
+	// - Docker 容器内部署时，需要访问宿主机的端口映射地址。
+	//   Docker Desktop 支持 host.docker.internal，
+	//   Linux 默认 docker bridge 网关为 172.17.0.1。
+	inContainer := utils.IsRunningInContainer()
+	checkURLs := []string{"http://localhost:9000/docs"}
+	if inContainer {
+		// 容器内：先尝试 host.docker.internal（Docker Desktop），
+		// 再回退到 docker bridge 网关
+		checkURLs = []string{
+			"http://host.docker.internal:9000/docs",
+			"http://172.17.0.1:9000/docs",
+		}
+	}
+
 	for i := 0; i < 60; i++ {
 		select {
 		case <-ctx.Done():
@@ -112,10 +130,12 @@ func installWhisper(ctx context.Context, sessionID string, params InstallParams,
 			break
 		}
 
-		// Also try curling
-		curlOut, _ := runCommand(ctx, "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "http://localhost:9000/docs", "--connect-timeout", "2")
-		if strings.TrimSpace(curlOut) == "200" {
-			break
+		// Also try curling the service
+		for _, checkURL := range checkURLs {
+			curlOut, _ := runCommand(ctx, "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", checkURL, "--connect-timeout", "2")
+			if strings.TrimSpace(curlOut) == "200" {
+				break
+			}
 		}
 
 		sendEvent(sessionID, events, "install.waiting", fmt.Sprintf("Waiting... (%d/60s)", i+1), "running")
@@ -126,10 +146,26 @@ func installWhisper(ctx context.Context, sessionID string, params InstallParams,
 
 	// Step 5: Verify
 	sendEvent(sessionID, events, "install.verifying", "Verifying installation...", "running")
-	curlOut, err := runCommand(ctx, "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "http://localhost:9000/docs", "--connect-timeout", "5")
-	if err != nil || strings.TrimSpace(curlOut) != "200" {
+
+	var verifyOK bool
+	for _, checkURL := range checkURLs {
+		curlOut, err := runCommand(ctx, "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", checkURL, "--connect-timeout", "5")
+		if err == nil && strings.TrimSpace(curlOut) == "200" {
+			verifyOK = true
+			break
+		}
+	}
+
+	if !verifyOK {
 		sendEvent(sessionID, events, "install.verifying", "", "failed")
-		return fmt.Errorf("service verification failed: HTTP %s", strings.TrimSpace(curlOut))
+
+		if inContainer {
+			return fmt.Errorf("service verification failed: 无法从容器内部访问 Whisper ASR 服务。" +
+				"请确认: 1) 容器已通过 docker ps 确认正在运行;" +
+				" 2) 宿主机的 9000 端口已正确映射（docker run -p 9000:9000）;" +
+				" 3) 如使用 Linux 而非 Docker Desktop，请确认宿主机与容器的网络互通（尝试 --network=host）")
+		}
+		return fmt.Errorf("service verification failed: HTTP check did not return 200 on localhost:9000")
 	}
 
 	sendEvent(sessionID, events, "install.verifying", "Whisper ASR installed and verified successfully", "running")

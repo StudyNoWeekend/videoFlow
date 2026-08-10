@@ -1,0 +1,29 @@
+services:
+  videoflow:
+    image: ghcr.io/studynoweekend/videoflow:latest
+    container_name: videoflow
+    restart: unless-stopped
+    ports:
+      # 将宿主机的 <port> 映射到容器内 nginx 的 80 端口
+      # 例如 - "8080:80" 表示通过 http://localhost:8080 访问
+      - "8080:80"
+    volumes:
+      # 必需：配置文件（基于 config.yaml.local 修改）
+      - ./config.yaml:/app/config/config.yaml:ro
+      # 必需：数据持久化（SQLite 数据库）
+      - ./data:/app/data
+      # 必需：宿主机 Docker 套接字（组件安装/检测/视频修复都需要）
+      - /var/run/docker.sock:/var/run/docker.sock
+      # 必需：视频目录，将宿主机视频目录挂载到容器内路径，
+      #       然后在 VideoFlow 配置中将 video.dir 设为对应的容器内路径
+      - /path/to/your/videos:/videos:ro
+      # 可选：日志目录
+      - ./logs:/app/logs
+    environment:
+      # 覆盖配置中的视频目录（容器内挂载路径）
+      - APP_VIDEO_DIR=/videos
+      # 可选：覆盖其他配置项（详见 config.yaml）
+      # - APP_ASR_URL=http://host.docker.internal:9000/asr
+      # - APP_REPAIR_DEVICE=cpu
+      # 时区设置
+      - TZ=Asia/Shanghai

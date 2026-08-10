@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"video-captions/internal/utils"
 )
 
 // Detector 组件检测器
@@ -78,6 +80,13 @@ func (d *Detector) detectDocker(ctx context.Context) ComponentInfo {
 	version, err := runCommand(ctx, "docker", "--version")
 	if err != nil {
 		info.Status = StatusMissing
+		// 容器内缺少 docker CLI 时给出清晰指引
+		inContainer := utils.IsRunningInContainer()
+		if inContainer {
+			info.ErrorMsg = "当前运行在 Docker 容器内，但未找到 docker CLI。" +
+				"请使用最新镜像（已内置 docker-cli），" +
+				"或在 docker run 时挂载宿主机 docker socket：-v /var/run/docker.sock:/var/run/docker.sock"
+		}
 		return info
 	}
 	info.Version = parseDockerVersion(version)
@@ -86,7 +95,13 @@ func (d *Detector) detectDocker(ctx context.Context) ComponentInfo {
 	_, err = runCommand(ctx, "docker", "info")
 	if err != nil {
 		info.Status = StatusError
-		info.ErrorMsg = "Docker daemon is not running"
+		inContainer := utils.IsRunningInContainer()
+		if inContainer {
+			info.ErrorMsg = "Docker daemon 不可达。请确保 docker run 时挂载了宿主机 Docker 套接字：" +
+				"-v /var/run/docker.sock:/var/run/docker.sock"
+		} else {
+			info.ErrorMsg = "Docker daemon is not running"
+		}
 		return info
 	}
 
@@ -152,6 +167,11 @@ func (d *Detector) detectLada(ctx context.Context) ComponentInfo {
 	_, err := runCommand(ctx, "docker", "image", "inspect", "ladaapp/lada:latest")
 	if err != nil {
 		info.Status = StatusMissing
+		// 检查是否是因为 docker daemon 不可达而非镜像不存在
+		if _, checkErr := runCommand(ctx, "docker", "info"); checkErr != nil {
+			info.ErrorMsg = "Docker daemon 不可达，无法检测 Lada 镜像。" +
+				"请确认 docker run 时已挂载 /var/run/docker.sock"
+		}
 		return info
 	}
 

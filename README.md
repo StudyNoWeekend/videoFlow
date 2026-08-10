@@ -73,56 +73,77 @@
 docker pull ghcr.io/studynoweekend/videoflow:latest
 ```
 
-1. 准备配置文件（基于模板修改）：
+**重要：挂载说明**
+
+VideoFlow 部署在 Docker 容器内，但需要操作**宿主机**的 Docker daemon（用于安装/检测 Whisper ASR、Lada 等组件），因此必须挂载 Docker 套接字。同时视频目录也需要通过 volume 挂载到容器内。
+
+推荐使用 `docker-compose`（配置文件见项目根目录 `docker-compose.yml`）：
 
 ```bash
+# 1. 准备配置文件（基于模板修改）
 cp backend/config/config.yaml.local config.yaml
-# 按需修改 config.yaml：asr.url、video.dir 等
+# 按需修改 config.yaml：video.dir 需设为容器内路径、asr.url 等
+
+# 2. 修改 docker-compose.yml 中的视频目录路径为你本机的视频目录
+
+# 3. 启动服务
+docker compose up -d
 ```
 
-2. 启动容器（端口、配置、数据、日志均可在 `docker run` 时指定）：
+或使用 `docker run`：
 
 ```bash
 docker run -d --name videoflow \
   --restart unless-stopped \
-  -e APP_HTTP_PORT=8080 \
-  -p 8080:8080 \
+  -p 8080:80 \
+  # 配置文件（必需）
   -v "$PWD/config.yaml:/app/config/config.yaml:ro" \
+  # 数据持久化（必需）
   -v "$PWD/data:/app/data" \
+  # 宿主机 Docker 套接字（必需：组件安装/检测/视频修复都需要）
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  # 视频目录（必需：将宿主机视频目录映射到容器内路径，
+  # 然后在 VideoFlow 设置页中配置对应容器内路径）
+  -v /宿主机/视频/目录:/videos:ro \
+  # 日志目录（可选）
   -v "$PWD/logs:/app/logs" \
+  # 视频目录配置（覆盖 config.yaml 中的 video.dir）
+  -e APP_VIDEO_DIR=/videos \
   ghcr.io/studynoweekend/videoflow:latest
 ```
+
+> **端口说明**：容器内 nginx 监听 **80** 端口，`-p 8080:80` 将宿主机 8080 映射到容器 80 端口；如需更换，只改左侧宿主机端口即可（如 `-p 9090:80`）。
 
 3. 健康检查：
 
 ```bash
-curl http://localhost:8080/health
+curl http://localhost:8080/api/v1/health
 # {"data":{"status":"ok"},"code":0,"msg":"success","trace_id":"..."}
 ```
 
-**更换端口**：只需改两处，端口真源单一：
-
-```bash
-docker run -d --name videoflow \
-  -e APP_HTTP_PORT=9090 -p 9090:9090 \
-  -v "$PWD/config.yaml:/app/config/config.yaml:ro" \
-  -v "$PWD/data:/app/data" \
-  ghcr.io/studynoweekend/videoflow:latest
-```
+> **Whisper ASR 在容器内部署的注意事项**：由于 VideoFlow 在容器内运行，`localhost:9000` 指向容器自身的网络而非宿主机。安装 Whisper ASR 容器后，在 VideoFlow 设置页中配置 ASR URL 时应使用 `http://host.docker.internal:9000/asr`（Docker Desktop）或 `http://172.17.0.1:9000/asr`（Linux 默认 bridge 网关），而非 `http://127.0.0.1:9000/asr`。
 
 <details>
 <summary><b>方式二：本地构建镜像</b></summary>
 
 ```bash
 docker build -t video-captions:latest -f Dockerfile .
+```
+
+**重要：** 如果用本地构建的镜像替换 ghcr.io 镜像，`docker run` 时同样需要挂载 Docker 套接字和视频目录：
+
+```bash
 docker run -d --name videoflow \
-  -e APP_HTTP_PORT=8080 -p 8080:8080 \
+  -p 8080:80 \
   -v "$PWD/config.yaml:/app/config/config.yaml:ro" \
   -v "$PWD/data:/app/data" \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v /宿主机/视频/目录:/videos:ro \
+  -e APP_VIDEO_DIR=/videos \
   video-captions:latest
 ```
 
-Dockerfile 为多阶段构建：`golang:1.25-alpine` 编译（CGO）+ `alpine:3.20` 运行（内置 ffmpeg）。支持 `linux/amd64` 和 `linux/arm64` 双架构。
+Dockerfile 为多阶段构建：`golang:1.25-alpine` 编译（CGO）+ `alpine:3.20` 运行（内置 ffmpeg 和 docker-cli）。支持 `linux/amd64` 和 `linux/arm64` 双架构。
 
 </details>
 
@@ -242,12 +263,17 @@ viper 前缀 `APP_`，配置键 `.` -> `_`，故 `http.port` 对应环境变量 
 <details>
 <summary><b>Docker 卷挂载点</b></summary>
 
-| 容器路径 | 用途 |
-| --- | --- |
-| `/app/config/config.yaml` | 配置文件（只读挂载） |
-| `/app/data` | SQLite 数据库持久化（`data/app.db`） |
-| `/app/logs` | 日志输出 |
-| `/var/run/docker.sock` | （可选）视频修复需要挂载宿主机 Docker socket |
+| 容器路径 | 用途 | 是否必需 |
+| --- | --- | --- |
+| `/app/config/config.yaml` | 配置文件（只读挂载） | ✅ 必需 |
+| `/app/data` | SQLite 数据库持久化（`data/app.db`） | ✅ 必需 |
+| `/var/run/docker.sock` | 宿主机 Docker 套接字，用于组件安装/检测/视频修复 | ✅ 必需 |
+| `/<容器内视频目录>` | 将宿主机视频目录挂载到容器内（如 `/videos`），然后在配置中将 `video.dir` 设为该路径 | ✅ 必需 |
+| `/app/logs` | 日志输出 | 可选 |
+
+> **为什么必须挂载 `/var/run/docker.sock`？** VideoFlow 运行在容器内，但它需要操作宿主机上的 Docker daemon——安装/检测 Whisper ASR 容器、拉取 Lada 镜像、执行视频修复 `docker run` 等，全部通过挂载的 Docker 套接字调用宿主机 Docker 实现。如果不挂载，组件管理页面会显示 Docker 不可用，视频修复功能也无法使用。
+
+> **视频目录挂载说明：** 宿主机视频目录通过 volume 挂载到容器内路径（如 `/videos`），然后在 VideoFlow 设置页中配置 `video.dir` 为该容器内路径。容器内的 Go 代码通过 `os.Stat` / `filepath.WalkDir` 访问已挂载的路径，无需额外配置。
 
 </details>
 
