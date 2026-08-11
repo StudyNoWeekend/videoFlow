@@ -1,5 +1,5 @@
 # ====== 阶段 1：构建前端 ======
-FROM node:22-alpine AS frontend-builder
+FROM swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/node:22-alpine AS frontend-builder
 
 # 前端构建参数（仅构建阶段生效，不影响运行时）
 ARG VITE_API_BASE_URL=/api
@@ -17,7 +17,7 @@ RUN npm run build-only
 
 # ====== 阶段 2：构建后端 ======
 # 使用官方 golang 镜像（支持 amd64 + arm64 多架构，配合 buildx 使用）
-FROM golang:1.25-alpine AS backend-builder
+FROM swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/golang:1.25-alpine AS backend-builder
 
 # CGO 依赖：gorm 的 sqlite 驱动基于 mattn/go-sqlite3，需要 gcc + musl-dev
 # git：go mod download 拉取部分依赖时需要
@@ -39,11 +39,14 @@ COPY backend/go.mod backend/go.sum ./
 RUN go mod download
 
 # 拷贝源码并编译
+# TARGETARCH 由 buildx --platform 自动注入（如 linux/amd64 → amd64，linux/arm64 → arm64）
+# 显式指定 GOARCH 确保编译出正确的目标架构二进制
 COPY backend/ ./
-RUN go build -trimpath -ldflags="-s -w" -o /out/video-captions ./cmd/api
+ARG TARGETARCH
+RUN GOARCH=${TARGETARCH} go build -trimpath -ldflags="-s -w" -o /out/video-captions ./cmd/api
 
 # ====== 阶段 3：运行时 ======
-FROM alpine:3.20
+FROM swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/alpine:3.20
 
 # 运行时依赖：
 #  - ffmpeg（含 ffprobe）：ffmpeg.provider=local 时必需
