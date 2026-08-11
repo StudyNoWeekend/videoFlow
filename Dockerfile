@@ -22,15 +22,12 @@ FROM golang:1.25-alpine AS backend-builder
 # CGO 依赖：gorm 的 sqlite 驱动基于 mattn/go-sqlite3，需要 gcc + musl-dev
 # git：go mod download 拉取部分依赖时需要
 # 使用国内镜像加速 apk
-# gcc-x86_64-linux-musl + gcc-aarch64-linux-musl：CGO 交叉编译工具链
-#   - 从 arm64 Mac 构建 amd64 镜像时，需要 x86_64-linux-musl-gcc
-#   - 从 amd64 机器构建 arm64 镜像时，需要 aarch64-linux-musl-gcc
-#   包很小（~2MB），统一安装免去条件判断的复杂性
+# 使用 buildx --platform linux/amd64 时，QEMU 模拟整个 amd64 环境，原生 gcc 即可
 RUN sed -i 's|dl-cdn.alpinelinux.org|mirrors.ustc.edu.cn|g' /etc/apk/repositories && \
-    apk add --no-cache gcc musl-dev git gcc-x86_64-linux-musl gcc-aarch64-linux-musl
+    apk add --no-cache gcc musl-dev git
 
 # CGO_ENABLED=1 以链接 sqlite 驱动
-# GOOS 固定 linux；GOARCH 由 buildx --platform 自动注入 TARGETARCH，在编译行指定
+# GOARCH 由 buildx --platform 自动注入（QEMU 模拟目标架构，原生 gcc 即可）
 ENV GOPROXY=https://goproxy.cn,direct \
     CGO_ENABLED=1 \
     GOOS=linux
@@ -42,17 +39,8 @@ COPY backend/go.mod backend/go.sum ./
 RUN go mod download
 
 # 拷贝源码并编译
-# TARGETARCH 由 buildx --platform 自动注入（如 linux/amd64 → amd64，linux/arm64 → arm64）
-# CGO 交叉编译时需要指定目标架构的 GCC：map TARGETARCH → Alpine 的交叉编译器名
 COPY backend/ ./
-ARG TARGETARCH
-RUN GOARCH=${TARGETARCH} \
-    CC=$(case "${TARGETARCH}" in \
-          amd64) echo x86_64-linux-musl-gcc ;; \
-          arm64) echo aarch64-linux-musl-gcc ;; \
-          *) echo gcc ;; \
-        esac) \
-    go build -trimpath -ldflags="-s -w" -o /out/video-captions ./cmd/api
+RUN go build -trimpath -ldflags="-s -w" -o /out/video-captions ./cmd/api
 
 # ====== 阶段 3：运行时 ======
 FROM alpine:3.20
