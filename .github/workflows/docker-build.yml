@@ -39,7 +39,8 @@ jobs:
       - name: Compute image tags
         id: meta
         run: |
-          IMG="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+          # Docker 要求仓库名全小写，将 "Owner/Repo" 转为小写
+          IMG="${{ env.REGISTRY }}/$(echo '${{ env.IMAGE_NAME }}' | tr '[:upper:]' '[:lower:]')"
           TAGS="$IMG:latest"
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then
             TAG="${GITHUB_REF#refs/tags/}"
