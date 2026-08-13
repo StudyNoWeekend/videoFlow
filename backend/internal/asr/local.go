@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	"video-captions/internal/subtitle"
 	"video-captions/utils/logger"
@@ -43,7 +42,7 @@ func NewASRClient(url, language string, vadFilter bool) *ASRClient {
 		task:      "transcribe",
 		encode:    true,
 		output:    "json",
-		client:    &http.Client{Timeout: 10 * time.Minute},
+		client:    &http.Client{},
 	}
 }
 
@@ -67,7 +66,7 @@ func NewASRClientWithOpts(url, language string, vadFilter bool, opts ASRClientOp
 		initialPrompt:  opts.InitialPrompt,
 		wordTimestamps: opts.WordTimestamps,
 		output:         opts.Output,
-		client:         &http.Client{Timeout: 10 * time.Minute},
+		client:         &http.Client{},
 	}
 	if c.task == "" {
 		c.task = "transcribe"

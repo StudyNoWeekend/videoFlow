@@ -15,6 +15,7 @@ func RegisterTaskRouter(r *gin.Engine) {
 		api.GET("", taskCtl.List)
 		api.POST("", taskCtl.Create)
 		api.POST("/:id/retry", taskCtl.Retry)
+		api.POST("/:id/cancel", taskCtl.Cancel)
 		api.DELETE("/:id", taskCtl.Delete)
 	}
 }

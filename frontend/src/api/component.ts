@@ -2,7 +2,7 @@ import request, { type ApiResponse } from './request'
 
 // 组件状态
 export type ComponentStatus = 'installed' | 'missing' | 'installing' | 'error'
-export type ComponentType = 'docker' | 'ffmpeg' | 'whisper_asr' | 'lada'
+export type ComponentType = 'docker' | 'ffmpeg' | 'lada'
 
 export interface ComponentInfo {
   type: ComponentType
@@ -15,15 +15,11 @@ export interface ComponentInfo {
 }
 
 export interface ComponentInstallReq {
-  component_type: 'whisper_asr' | 'lada' | 'ffmpeg'
-  asr_engine?: 'openai_whisper' | 'faster_whisper' | 'whisperx'
-  asr_model?: string
-  asr_device?: 'cpu' | 'cuda'
-  hf_token?: string
+  component_type: 'lada' | 'ffmpeg'
 }
 
 export interface ComponentUninstallReq {
-  component_type: 'whisper_asr' | 'lada' | 'ffmpeg'
+  component_type: 'lada' | 'ffmpeg'
 }
 
 export interface ProgressEvent {

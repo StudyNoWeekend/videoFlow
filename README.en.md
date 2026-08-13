@@ -393,6 +393,8 @@ Defaults to `data/app.db` (SQLite). When deploying with Docker, mount the `/app/
 - ✅ Multi-architecture images (native amd64 + arm64 support)
 - 🔲 Subtitle online preview / editing
 - 🔲 Subtitle file export & download
+- 🔲 API Key authentication for external network access interception
+- 🔲 Video clarity repair (super-resolution enhancement)
 
 ## 💌 Acknowledgements
 

@@ -111,8 +111,6 @@ func (sm *SessionManager) runInstallation(ctx context.Context, session *InstallS
 		err = uninstallComponent(ctx, session.ID, session.Params.ComponentType, events)
 	default:
 		switch session.Params.ComponentType {
-		case ComponentWhisperASR:
-			err = installWhisper(ctx, session.ID, session.Params, events)
 		case ComponentLada:
 			err = installLada(ctx, session.ID, session.Params, events)
 		case ComponentFFmpeg:

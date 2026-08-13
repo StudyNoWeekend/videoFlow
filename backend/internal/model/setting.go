@@ -27,6 +27,7 @@ const (
 	SettingKeyRepairDockerImage    = "repair_docker_image"
 	SettingKeyRepairDevice         = "repair_device"
 	SettingKeySubtitleConcurrency  = "subtitle_concurrency"
+	SettingKeySubtitleBurnConcurrency = "subtitle_burn_concurrency"
 	SettingKeyRepairConcurrency    = "repair_concurrency"
 	SettingKeyTranslateConcurrency = "translate_concurrency"
 )
@@ -47,8 +48,9 @@ const (
 	// DefaultRepairDevice 视频修复默认计算设备
 	// 支持四种设备：cpu（CPU）、cuda:0（NVIDIA CUDA）、mps（Apple Silicon MPS）、xpu:0（Intel XPU）
 	DefaultRepairDevice         = "cpu"
-	DefaultSubtitleConcurrency  = "2"
-	DefaultRepairConcurrency    = "1"
+		DefaultSubtitleConcurrency  = "2"
+		DefaultSubtitleBurnConcurrency = "1"
+		DefaultRepairConcurrency    = "1"
 	DefaultTranslateConcurrency = "1"
 )
 

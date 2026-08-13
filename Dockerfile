@@ -2,7 +2,7 @@
 FROM swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/node:22-alpine AS frontend-builder
 
 # 前端构建参数（仅构建阶段生效，不影响运行时）
-ARG VITE_API_BASE_URL=/api
+ARG VITE_API_BASE_URL=/
 ARG VITE_APP_TITLE=VideoFlow
 
 WORKDIR /frontend
@@ -39,11 +39,8 @@ COPY backend/go.mod backend/go.sum ./
 RUN go mod download
 
 # 拷贝源码并编译
-# TARGETARCH 由 buildx --platform 自动注入（如 linux/amd64 → amd64，linux/arm64 → arm64）
-# 显式指定 GOARCH 确保编译出正确的目标架构二进制
 COPY backend/ ./
-ARG TARGETARCH
-RUN GOARCH=${TARGETARCH} go build -trimpath -ldflags="-s -w" -o /out/video-captions ./cmd/api
+RUN go build -trimpath -ldflags="-s -w" -o /out/video-captions ./cmd/api
 
 # ====== 阶段 3：运行时 ======
 FROM swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/alpine:3.20

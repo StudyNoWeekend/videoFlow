@@ -65,10 +65,6 @@ func (l *ComponentLogic) ListComponents(ctx context.Context) (*res.ComponentList
 func (l *ComponentLogic) InstallComponent(ctx context.Context, req *req.ComponentInstallReq) (*res.ComponentInstallRes, error) {
 	params := component.InstallParams{
 		ComponentType: component.ComponentType(req.ComponentType),
-		ASREngine:     req.ASREngine,
-		ASRModel:      req.ASRModel,
-		ASRDevice:     req.ASRDevice,
-		HFToken:       req.HFToken,
 	}
 	session := l.sessionManager.CreateSession(params)
 	return &res.ComponentInstallRes{SessionID: session.ID}, nil

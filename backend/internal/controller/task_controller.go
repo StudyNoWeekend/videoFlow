@@ -87,3 +87,20 @@ func (ctl *TaskController) Delete(c *gin.Context) {
 	}
 	response.Success(c, nil)
 }
+
+// Cancel 取消任务
+// POST /api/v1/tasks/:id/cancel
+func (ctl *TaskController) Cancel(c *gin.Context) {
+	id := c.Param("id")
+	if id == "" {
+		response.FailByBizError(c, enum.ErrInvalidParam)
+		return
+	}
+
+	res, err := ctl.taskLogic.CancelTask(c.Request.Context(), id)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	response.Success(c, res)
+}

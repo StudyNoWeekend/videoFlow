@@ -3,9 +3,11 @@ package repair
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -58,6 +60,162 @@ func (e *Executor) Reload(cfg Config) error {
 	return nil
 }
 
+// resolveHostPath 将容器内路径转换为宿主机路径。
+// 在 Docker 容器内通过宿主机 Docker daemon 执行 docker run 时，bind mount 的 src 路径
+// 必须是宿主机的文件系统路径，而非容器内路径。
+//
+// 优先通过 docker inspect 获取准确的宿主机路径（不受 btrfs subvol / overlay2 等影响），
+// 失败时 fallback 到 /proc/self/mountinfo 解析。
+// 非 Docker 环境或路径无法映射时返回原路径。
+func resolveHostPath(containerPath string) string {
+	// 优先通过 docker inspect 获取挂载的 Source（宿主机完整路径）
+	if hostPath, ok := resolveHostPathViaDocker(containerPath); ok {
+		return hostPath
+	}
+	// Fallback: 通过 /proc/self/mountinfo 解析（非 btrfs subvol 场景下可用）
+	return resolveHostPathViaMountinfo(containerPath)
+}
+
+// containerMountEntry 表示 docker inspect 返回的挂载条目
+type containerMountEntry struct {
+	Source      string `json:"Source"`
+	Destination string `json:"Destination"`
+}
+
+// cachedMounts 缓存 docker inspect 的挂载结果，避免每次修复都执行一次。
+var (
+	cachedMounts     []containerMountEntry
+	cachedMountsOnce sync.Once
+)
+
+// loadContainerMounts 通过 docker inspect 获取当前容器的所有 bind mount 信息。
+// 结果在首次调用后缓存。返回 nil 表示无法获取（非 Docker 环境或 docker 不可用）。
+func loadContainerMounts() []containerMountEntry {
+	cachedMountsOnce.Do(func() {
+		containerID := getContainerID()
+		if containerID == "" {
+			return
+		}
+		cmd := exec.Command("docker", "inspect",
+			"--format", "{{json .Mounts}}", containerID)
+		output, err := cmd.Output()
+		if err != nil {
+			return
+		}
+		var mounts []containerMountEntry
+		if err := json.Unmarshal(output, &mounts); err != nil {
+			return
+		}
+		cachedMounts = mounts
+	})
+	return cachedMounts
+}
+
+// resolveHostPathViaDocker 通过 docker inspect 获取挂载信息，
+// 找到 Destination 最长匹配 containerPath 的挂载，返回其 Source（宿主机路径）。
+func resolveHostPathViaDocker(containerPath string) (string, bool) {
+	mounts := loadContainerMounts()
+	if mounts == nil {
+		return "", false
+	}
+
+	bestMatchLen := 0
+	bestSource := ""
+	for _, m := range mounts {
+		if m.Destination == "" || m.Source == "" {
+			continue
+		}
+		if strings.HasPrefix(containerPath, m.Destination) && len(m.Destination) > bestMatchLen {
+			bestMatchLen = len(m.Destination)
+			bestSource = m.Source
+		}
+	}
+
+	if bestSource != "" {
+		suffix := containerPath[bestMatchLen:]
+		return filepath.Join(bestSource, suffix), true
+	}
+	return "", false
+}
+
+// getContainerID 获取当前容器的 ID。
+// 优先从 /proc/self/cgroup 解析，失败时 fallback 到 hostname（Docker 默认为容器短 ID）。
+func getContainerID() string {
+	data, err := os.ReadFile("/proc/self/cgroup")
+	if err == nil {
+		for _, line := range strings.Split(string(data), "\n") {
+			// cgroup v2: 0::/.../docker-<id>.scope
+			if idx := strings.Index(line, "docker-"); idx >= 0 {
+				s := line[idx+len("docker-"):]
+				if end := strings.Index(s, ".scope"); end >= 0 {
+					return s[:end]
+				}
+			}
+			// cgroup v1/v2: ...:/docker/<id>
+			if idx := strings.Index(line, "/docker/"); idx >= 0 {
+				return strings.TrimSpace(line[idx+len("/docker/"):])
+			}
+		}
+	}
+
+	// Fallback: hostname（Docker 默认为容器短 ID，12 位）
+	if hostname, err := os.Hostname(); err == nil && hostname != "" {
+		return hostname
+	}
+	return ""
+}
+
+// resolveHostPathViaMountinfo 通过 /proc/self/mountinfo 解析容器内路径到宿主机路径。
+// 注意：在 btrfs subvol / overlay2 等场景下，mountinfo 的 root 字段记录的是
+// 相对于文件系统根的路径，而非宿主机绝对路径，此函数在这些场景下可能不准确。
+func resolveHostPathViaMountinfo(containerPath string) string {
+	data, err := os.ReadFile("/proc/self/mountinfo")
+	if err != nil {
+		return containerPath
+	}
+
+	bestMatchLen := 0
+	bestHostRoot := ""
+
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		fields := strings.Fields(line)
+
+		// mountinfo 格式：
+		// mount_id parent_id major:minor root mount_point options [optional_fields] - fstype source super_options
+		// fields[3]=root（源路径）, fields[4]=mount_point（挂载点），位置固定
+		// 注意：optional_fields 是可选的（如无 shared:/master: 标记则不出现），
+		// 因此不能用 "-" 的位置来定位前两个字段，否则会误跳过无 optional_fields 的行。
+		if len(fields) < 5 {
+			continue
+		}
+
+		mountPoint := fields[4]
+		hostRoot := fields[3]
+
+		// 跳过根挂载点 "/"，避免误匹配
+		if mountPoint == "/" {
+			continue
+		}
+
+		// 找最长匹配的 mount_point 前缀（处理嵌套挂载）
+		if strings.HasPrefix(containerPath, mountPoint) && len(mountPoint) > bestMatchLen {
+			bestMatchLen = len(mountPoint)
+			bestHostRoot = hostRoot
+		}
+	}
+
+	if bestHostRoot != "" {
+		suffix := containerPath[bestMatchLen:]
+		return filepath.Join(bestHostRoot, suffix)
+	}
+	return containerPath
+}
+
 // Execute 在本地执行视频修复命令，并通过 onProgress 实时回调进度。
 // 返回命令完整输出（stdout + stderr）以及可能的错误。
 func (e *Executor) Execute(ctx context.Context, videoPath string, onProgress ProgressCallback) (output string, err error) {
@@ -68,13 +226,21 @@ func (e *Executor) Execute(ctx context.Context, videoPath string, onProgress Pro
 	parentDir := filepath.Dir(videoPath)
 	baseName := filepath.Base(videoPath)
 
-	args := []string{
-		"run", "--rm",
-		"--mount", fmt.Sprintf("type=bind,src=%s,dst=/mnt", parentDir),
-		cfg.DockerImage,
-		"--input", "/mnt/" + baseName,
-		"--device", cfg.Device,
-	}
+	// 自动将容器内路径翻译为宿主机路径（Docker 部署场景）
+	// 通过宿主机的 Docker daemon 启动 Lada 容器时，bind mount 的 src 必须是宿主机路径
+	hostParentDir := resolveHostPath(parentDir)
+
+// 用文件名称作为容器名称，方便识别
+		containerName := strings.TrimSuffix(baseName, filepath.Ext(baseName)) + "_lada"
+
+		args := []string{
+			"run", "--rm",
+			"--name", containerName,
+			"--mount", fmt.Sprintf("type=bind,src=%s,dst=/mnt", hostParentDir),
+			cfg.DockerImage,
+			"--input", "/mnt/" + baseName,
+			"--device", cfg.Device,
+		}
 
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	out, err := streamCommand(cmd, onProgress)

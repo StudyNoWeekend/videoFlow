@@ -52,6 +52,15 @@ func IsVideoFile(path string) bool {
 	return ok
 }
 
+// GetSupportedExtensions 返回所有支持的视频格式扩展名列表
+func GetSupportedExtensions() []string {
+	exts := make([]string, 0, len(videoExtensions))
+	for ext := range videoExtensions {
+		exts = append(exts, ext)
+	}
+	return exts
+}
+
 // VideoCreate 创建视频记录
 func VideoCreate(ctx context.Context, video *Video) error {
 	return DB.WithContext(ctx).Create(video).Error

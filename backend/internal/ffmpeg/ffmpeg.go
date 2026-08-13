@@ -1,25 +1,52 @@
 package ffmpeg
 
 import (
-	"bytes"
-	"context"
-	"errors"
-	"fmt"
-	"io"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"regexp"
-	"strconv"
-	"strings"
-	"sync"
-	"time"
+		"bufio"
+		"bytes"
+		"context"
+		"errors"
+		"fmt"
+		"io"
+		"os"
+		"os/exec"
+		"path/filepath"
+		"regexp"
+		"strconv"
+		"strings"
+		"sync"
+		"time"
 
-	"video-captions/enum"
-)
+		"video-captions/enum"
+	)
 
 // 用于从 ffmpeg -i 输出中匹配时长的正则表达式
 var durationRegex = regexp.MustCompile(`Duration: (\d{2}):(\d{2}):(\d{2}\.\d+)`)
+
+// burnSizeRegex 用于从 ffmpeg 进度输出中匹配已写入大小，兼容不同版本的单位：
+// ffmpeg 7.x 输出 KiB（二进制），ffmpeg 6.x 及更早输出 kB（十进制）。
+// 例如 "frame=  123 fps= 12 q=28.0 size=   122240KiB time=..." 或 "size=   122240kB"
+var burnSizeRegex = regexp.MustCompile(`size=\s*(\d+)\s*([kK][iI]?B)`)
+
+// parseBurnSizeBytes 从 ffmpeg 进度行解析当前已写入大小（字节）。
+// 单位含 i（如 KiB/IEC）按 1024 换算，否则（kB，旧版 ffmpeg）按 1000 换算。
+func parseBurnSizeBytes(line string) (int64, bool) {
+	matches := burnSizeRegex.FindStringSubmatch(line)
+	if len(matches) < 3 {
+		return 0, false
+	}
+	n, err := strconv.ParseInt(matches[1], 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	unit := strings.ToLower(matches[2])
+	if strings.Contains(unit, "i") {
+		return n * 1024, true
+	}
+	return n * 1000, true
+}
+
+// BurnProgressCallback 字幕烧录进度回调，currentBytes 为当前已写入字节数，totalBytes 为输入视频总字节数
+type BurnProgressCallback func(currentBytes, totalBytes int64)
 
 // Provider 定义 ffmpeg 执行环境类型
 type Provider string
@@ -391,7 +418,7 @@ func escapeSubtitlesPath(path string) string {
 // videoPath: 输入视频路径；srtPath: SRT 字幕文件路径；outputPath: 输出视频路径。
 // 本地模式下所有路径均为本地路径；SSH 模式下 videoPath 和 outputPath 为远程路径，
 // srtPath 为本地路径（函数内部会自动上传到远程临时文件）。
-func BurnSubtitles(ctx context.Context, videoPath, srtPath, outputPath string) error {
+func BurnSubtitles(ctx context.Context, videoPath, srtPath, outputPath string, onProgress BurnProgressCallback) error {
 	if err := ensureFFmpeg(ctx); err != nil {
 		return err
 	}
@@ -399,18 +426,20 @@ func BurnSubtitles(ctx context.Context, videoPath, srtPath, outputPath string) e
 	if isRemote() {
 		return burnSubtitlesRemote(ctx, videoPath, srtPath, outputPath)
 	}
-	return burnSubtitlesLocal(ctx, videoPath, srtPath, outputPath)
+	return burnSubtitlesLocal(ctx, videoPath, srtPath, outputPath, onProgress)
 }
 
 // burnSubtitlesLocal 在本机调用 ffmpeg 将字幕烧录到视频
-func burnSubtitlesLocal(ctx context.Context, videoPath, srtPath, outputPath string) error {
+func burnSubtitlesLocal(ctx context.Context, videoPath, srtPath, outputPath string, onProgress BurnProgressCallback) error {
 	// 检查视频文件是否存在
-	if _, err := os.Stat(videoPath); err != nil {
+	videoInfo, err := os.Stat(videoPath)
+	if err != nil {
 		if os.IsNotExist(err) {
 			return fmt.Errorf("%w: %s", enum.ErrVideoNotFound, videoPath)
 		}
 		return fmt.Errorf("%w: %v", enum.ErrVideoNotFound, err)
 	}
+	totalBytes := videoInfo.Size()
 
 	// 检查字幕文件是否存在
 	if _, err := os.Stat(srtPath); err != nil {
@@ -437,9 +466,62 @@ func burnSubtitlesLocal(ctx context.Context, videoPath, srtPath, outputPath stri
 		outputPath,
 	}
 
-	output, err := run(ctx, "ffmpeg", args...)
+	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
+	stderr, err := cmd.StderrPipe()
 	if err != nil {
-		return fmt.Errorf("%w: %v, output: %s", enum.ErrSubtitleBurn, err, string(output))
+		return fmt.Errorf("%w: 创建 stderr pipe 失败: %v", enum.ErrSubtitleBurn, err)
+	}
+
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("%w: 启动 ffmpeg 失败: %v", enum.ErrSubtitleBurn, err)
+	}
+
+	// 逐行读取 stderr，解析 size 字段。
+	// 注意：不能使用 bufio.Scanner 按行切分——ffmpeg 会输出无换行符控制的超长内容
+	// （如字体加载、版本信息等），一旦单行超过 Scanner 的 token 上限会提前退出，
+	// 导致 stderr 管道无人消费、ffmpeg 阻塞在写 stderr 上而死锁。
+	// 这里采用 bufio.Reader 逐字节读取，按 \r 或 \n 自行切分，无长度上限。
+	var lastReportedBytes int64 = -1
+	reader := bufio.NewReaderSize(stderr, 64*1024)
+	var lineBuf strings.Builder
+	for {
+		b, err := reader.ReadByte()
+		if err != nil {
+			if err == io.EOF {
+				// 处理末尾无换行符的残留内容
+				if lineBuf.Len() > 0 {
+					if currentBytes, ok := parseBurnSizeBytes(lineBuf.String()); ok && currentBytes != lastReportedBytes {
+						lastReportedBytes = currentBytes
+						if onProgress != nil {
+							onProgress(currentBytes, totalBytes)
+						}
+					}
+				}
+				break
+			}
+			return fmt.Errorf("%w: 读取 ffmpeg 输出失败: %v", enum.ErrSubtitleBurn, err)
+		}
+		if b == '\r' || b == '\n' {
+			line := lineBuf.String()
+			lineBuf.Reset()
+			if currentBytes, ok := parseBurnSizeBytes(line); ok {
+				if currentBytes != lastReportedBytes {
+					lastReportedBytes = currentBytes
+					if onProgress != nil {
+						onProgress(currentBytes, totalBytes)
+					}
+				}
+			}
+			continue
+		}
+		lineBuf.WriteByte(b)
+	}
+
+	// 等待命令完成
+	waitErr := cmd.Wait()
+
+	if waitErr != nil {
+		return fmt.Errorf("%w: %v", enum.ErrSubtitleBurn, waitErr)
 	}
 	return nil
 }

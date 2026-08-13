@@ -7,6 +7,7 @@ import { getActiveSession, getInstallHistory } from '@/api/component'
 import type { ComponentInfo, ComponentInstallReq } from '@/api/component'
 
 const { t } = useI18n()
+
 const componentStore = useComponentStore()
 const refreshing = ref(false)
 
@@ -16,14 +17,6 @@ const installComponentType = ref<string>('')
 const installSessionId = ref<string>('')
 const installLogs = ref<string[]>([])
 const installStatus = ref<string>('')
-
-// Install form params
-const installParams = ref({
-  asr_engine: 'openai_whisper',
-  asr_model: 'base',
-  asr_device: 'cpu',
-  hf_token: '',
-})
 
 // SSE ref
 let eventSource: EventSource | null = null
@@ -90,12 +83,6 @@ async function handleInstall(comp: ComponentInfo): Promise<void> {
   }
 
   installComponentType.value = comp.type
-  installParams.value = {
-    asr_engine: 'openai_whisper',
-    asr_model: 'base',
-    asr_device: 'cpu',
-    hf_token: '',
-  }
   installLogs.value = []
   installStatus.value = ''
   installDialogVisible.value = true
@@ -111,13 +98,6 @@ async function confirmInstall(): Promise<void> {
 
   const data: ComponentInstallReq = {
     component_type: installComponentType.value as ComponentInstallReq['component_type'],
-  }
-
-  if (installComponentType.value === 'whisper_asr') {
-    data.asr_engine = installParams.value.asr_engine as ComponentInstallReq['asr_engine']
-    data.asr_model = installParams.value.asr_model
-    data.asr_device = installParams.value.asr_device as ComponentInstallReq['asr_device']
-    data.hf_token = installParams.value.hf_token
   }
 
   try {
@@ -361,9 +341,6 @@ onMounted(async () => {
             <el-button v-if="comp.status === 'error'" type="warning" size="small" @click="handleReinstall(comp)">
               {{ $t('components.btn.reinstall') }}
             </el-button>
-            <el-button size="small" @click="handleShowLog(comp)">
-              {{ $t('components.btn.logs') }}
-            </el-button>
           </template>
           <template v-else-if="comp.status === 'installed'">
             <el-button type="warning" size="small" @click="handleReinstall(comp)">
@@ -386,33 +363,8 @@ onMounted(async () => {
       :title="$t('components.dialog.install.title', { name: installComponentType })"
       width="500px"
     >
-      <el-form label-width="140px" v-if="installComponentType === 'whisper_asr'">
-        <el-form-item :label="$t('components.param.asr_engine')">
-          <el-select v-model="installParams.asr_engine">
-            <el-option label="openai_whisper" value="openai_whisper" />
-            <el-option label="faster_whisper" value="faster_whisper" />
-            <el-option label="whisperx" value="whisperx" />
-          </el-select>
-        </el-form-item>
-        <el-form-item :label="$t('components.param.asr_model')">
-          <el-select v-model="installParams.asr_model">
-            <el-option label="tiny" value="tiny" />
-            <el-option label="base" value="base" />
-            <el-option label="small" value="small" />
-            <el-option label="medium" value="medium" />
-            <el-option label="large-v3" value="large-v3" />
-            <el-option label="large-v3-turbo" value="large-v3-turbo" />
-          </el-select>
-        </el-form-item>
-        <el-form-item :label="$t('components.param.asr_device')">
-          <el-radio-group v-model="installParams.asr_device">
-            <el-radio-button label="cpu">{{ $t('components.param.asr_device_cpu') }}</el-radio-button>
-            <el-radio-button label="cuda">{{ $t('components.param.asr_device_gpu') }}</el-radio-button>
-          </el-radio-group>
-        </el-form-item>
-        <el-form-item :label="$t('components.param.hf_token')">
-          <el-input v-model="installParams.hf_token" :placeholder="`${$t('components.param.hf_token')}`" />
-        </el-form-item>
+      <el-form label-width="140px" v-if="installComponentType === 'lada'">
+        <el-text>Lada 将直接拉取镜像运行，无需额外配置。</el-text>
       </el-form>
 
       <template #footer>

@@ -64,6 +64,17 @@ func main() {
 
 	// 启动任务调度器
 	taskScheduler := scheduler.NewTaskScheduler(model.DB)
+	// 注册到全局实例，供任务取消等业务逻辑调用
+	scheduler.Default = taskScheduler
+
+	// 兜底清理：将上次非正常退出（容器被强杀、断电等）残留的 running 任务标记为失败，
+	// 避免任务永远停留在 running 状态而无法重新调度
+	if affected, err := model.TaskMarkRunningAsFailed(context.Background(), "服务异常终止"); err != nil {
+		log.Printf("清理残留运行中任务失败: %v", err)
+	} else if affected > 0 {
+		log.Printf("已将 %d 个残留运行中任务标记为失败（原因：上次服务异常终止）", affected)
+	}
+
 	if err := taskScheduler.Start(context.Background()); err != nil {
 		log.Fatalf("启动任务调度器失败: %v", err)
 	}

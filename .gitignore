@@ -17,6 +17,7 @@ frontend/*.log
 # IDE
 .idea/
 .trae/
+.zcode/
 .vscode/
 *.swp
 *.swo

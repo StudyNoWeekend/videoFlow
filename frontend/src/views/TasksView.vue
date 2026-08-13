@@ -2,7 +2,7 @@
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useI18n } from 'vue-i18n'
-import { listTasks, retryTask, deleteTask } from '@/api/task'
+import { listTasks, retryTask, cancelTask, deleteTask } from '@/api/task'
 import type { Task, TaskType } from '@/api/task'
 import { formatTime } from '@/utils/format'
 
@@ -14,6 +14,16 @@ const page = ref<number>(1)
 const pageSize = ref<number>(10)
 const total = ref<number>(0)
 let pollTimer: number | null = null
+
+// 轮询间隔选项（毫秒），空字符串表示不轮询
+const pollingOptions = [
+  { value: 5000, label: 'tasks.polling.5s' },
+  { value: 10000, label: 'tasks.polling.10s' },
+  { value: 60000, label: 'tasks.polling.1m' },
+  { value: 1800000, label: 'tasks.polling.30m' },
+  { value: 0, label: 'tasks.polling.off' },
+]
+const pollingInterval = ref<number>(5000)
 
 const runningCount = computed(() => taskList.value.filter((t) => t.status === 'running').length)
 const failedCount = computed(() => taskList.value.filter((t) => t.status === 'failed').length)
@@ -28,6 +38,26 @@ async function loadTasks(): Promise<void> {
     pageSize.value = res.page_size
   } finally {
     loading.value = false
+  }
+}
+
+// 轮询时只更新进度、状态、错误信息，不显示全表 loading，也不重置分页
+async function pollTasks(): Promise<void> {
+  try {
+    const res = await listTasks(page.value, pageSize.value, activeType.value || undefined)
+    // 只更新进度/状态/错误信息，保持现有数据
+    for (const incoming of res.list) {
+      const existing = taskList.value.find((t) => t.id === incoming.id)
+      if (existing) {
+        existing.status = incoming.status
+        existing.progress = incoming.progress
+        existing.progress_msg = incoming.progress_msg
+        existing.error_msg = incoming.error_msg
+      }
+    }
+    total.value = res.total
+  } catch {
+    // 静默处理轮询错误
   }
 }
 
@@ -64,6 +94,24 @@ async function handleDelete(task: Task): Promise<void> {
   }
 }
 
+async function handleCancel(task: Task): Promise<void> {
+  try {
+    await ElMessageBox.confirm(
+      t('tasks.cancel.confirm'),
+      t('common.notice'),
+      { confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel'), type: 'warning' }
+    )
+    await cancelTask(task.id)
+    ElMessage.success(t('tasks.cancel.success'))
+    task.status = 'cancelling'
+    await loadTasks()
+  } catch (error) {
+    if (error !== 'cancel') {
+      // 非取消操作
+    }
+  }
+}
+
 function statusType(status: string): '' | 'success' | 'danger' | 'warning' | 'info' {
   switch (status) {
     case 'completed':
@@ -72,6 +120,9 @@ function statusType(status: string): '' | 'success' | 'danger' | 'warning' | 'in
       return ''
     case 'failed':
       return 'danger'
+    case 'cancelling':
+      return 'warning'
+    case 'cancelled':
     case 'pending':
       return 'info'
     default:
@@ -85,6 +136,8 @@ function statusText(status: string): string {
     running: t('tasks.status.running'),
     completed: t('tasks.status.completed'),
     failed: t('tasks.status.failed'),
+    cancelling: t('tasks.status.cancelling'),
+    cancelled: t('tasks.status.cancelled'),
   }
   return map[status] || status
 }
@@ -92,7 +145,9 @@ function statusText(status: string): string {
 function typeText(type: string): string {
   const map: Record<string, string> = {
     subtitle: t('tasks.type.subtitle'),
-    repair: t('tasks.type.repair'),
+    subtitle_burn: t('tasks.type.subtitle_burn'),
+    deblur: t('tasks.type.deblur'),
+    translate: t('tasks.type.translate'),
   }
   return map[type] || type
 }
@@ -100,7 +155,7 @@ function typeText(type: string): string {
 function statusLedClass(status: string): string {
   if (status === 'completed') return 'vf-led--green'
   if (status === 'failed') return 'vf-led--red'
-  if (status === 'running') return 'vf-led--amber vf-led--pulse'
+  if (status === 'running' || status === 'cancelling') return 'vf-led--amber vf-led--pulse'
   return 'vf-led--cyan'
 }
 
@@ -115,20 +170,17 @@ function handleSizeChange(size: number): void {
   loadTasks()
 }
 
-onMounted(() => {
-  loadTasks()
+function handlePollingChange(value: number): void {
+  pollingInterval.value = value
   startPolling()
-})
-
-onUnmounted(() => {
-  stopPolling()
-})
+}
 
 function startPolling(): void {
   stopPolling()
+  if (pollingInterval.value <= 0) return
   pollTimer = window.setInterval(() => {
-    loadTasks()
-  }, 2000)
+    pollTasks()
+  }, pollingInterval.value)
 }
 
 function stopPolling(): void {
@@ -137,6 +189,15 @@ function stopPolling(): void {
     pollTimer = null
   }
 }
+
+onMounted(() => {
+  loadTasks()
+  startPolling()
+})
+
+onUnmounted(() => {
+  stopPolling()
+})
 </script>
 
 <template>
@@ -169,13 +230,22 @@ function stopPolling(): void {
         <el-radio-group v-model="activeType" @change="handleTypeChange">
           <el-radio-button label="">{{ $t('tasks.filter.all') }}</el-radio-button>
           <el-radio-button label="subtitle">{{ $t('tasks.filter.subtitle') }}</el-radio-button>
-          <el-radio-button label="repair">{{ $t('tasks.filter.repair') }}</el-radio-button>
+          <el-radio-button label="subtitle_burn">{{ $t('tasks.filter.subtitle_burn') }}</el-radio-button>
+          <el-radio-button label="deblur">{{ $t('tasks.filter.deblur') }}</el-radio-button>
         </el-radio-group>
 
         <div class="toolbar-right">
-          <div class="poll-indicator">
-            <span class="vf-led vf-led--green vf-led--pulse"></span>
-            <span class="vf-data-label">{{ $t('tasks.polling') }}</span>
+          <div class="poll-control">
+            <span class="vf-data-label">{{ $t('tasks.polling.label') }}</span>
+            <el-select v-model="pollingInterval" size="small" style="width: 110px" @change="handlePollingChange">
+              <el-option
+                v-for="opt in pollingOptions"
+                :key="opt.value"
+                :label="$t(opt.label)"
+                :value="opt.value"
+              />
+            </el-select>
+            <span v-if="pollingInterval > 0" class="vf-led vf-led--green vf-led--pulse"></span>
           </div>
           <el-button type="primary" @click="loadTasks">
             <el-icon><Refresh /></el-icon>{{ $t('tasks.refresh') }}
@@ -197,7 +267,7 @@ function stopPolling(): void {
           </el-table-column>
           <el-table-column :label="$t('tasks.column.type')" width="100">
             <template #default="{ row }">
-              <el-tag :type="row.task_type === 'repair' ? 'warning' : 'primary'">{{ typeText(row.task_type) }}</el-tag>
+              <el-tag :type="row.task_type === 'deblur' ? 'warning' : row.task_type === 'subtitle_burn' ? 'success' : 'primary'">{{ typeText(row.task_type) }}</el-tag>
             </template>
           </el-table-column>
           <el-table-column :label="$t('tasks.column.status')" width="130">
@@ -224,12 +294,33 @@ function stopPolling(): void {
               {{ formatTime(row.created_at) }}
             </template>
           </el-table-column>
-          <el-table-column :label="$t('tasks.column.action')" width="180" fixed="right">
+          <el-table-column :label="$t('tasks.column.action')" width="210" fixed="right">
             <template #default="{ row }">
-              <el-button v-if="row.status === 'failed'" type="warning" size="small" @click="handleRetry(row)">
+              <el-button
+                v-if="row.status === 'failed' || row.status === 'cancelled'"
+                type="warning"
+                size="small"
+                @click="handleRetry(row)"
+              >
                 {{ $t('tasks.btn.retry') }}
               </el-button>
-              <el-button v-if="row.status !== 'running'" type="danger" size="small" @click="handleDelete(row)">{{ $t('tasks.btn.delete') }}</el-button>
+              <el-button
+                v-if="row.status === 'running' || row.status === 'pending'"
+                type="danger"
+                plain
+                size="small"
+                @click="handleCancel(row)"
+              >
+                {{ $t('tasks.btn.cancel') }}
+              </el-button>
+              <el-button
+                v-if="row.status !== 'running' && row.status !== 'cancelling'"
+                type="danger"
+                size="small"
+                @click="handleDelete(row)"
+              >
+                {{ $t('tasks.btn.delete') }}
+              </el-button>
             </template>
           </el-table-column>
           <template #empty>
@@ -321,7 +412,7 @@ function stopPolling(): void {
   gap: 14px;
 }
 
-.poll-indicator {
+.poll-control {
   display: flex;
   align-items: center;
   gap: 8px;

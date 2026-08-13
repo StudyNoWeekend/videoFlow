@@ -15,21 +15,29 @@ const (
 	TaskStatusRunning   = "running"
 	TaskStatusCompleted = "completed"
 	TaskStatusFailed    = "failed"
+	// TaskStatusCancelling 正在取消的瞬时状态，仅存在于运行中任务被请求取消后、
+	// worker 落定终态前，用于可靠处理取消与任务结束之间的竞态
+	TaskStatusCancelling = "cancelling"
+	// TaskStatusCancelled 已取消的终态
+	TaskStatusCancelled = "cancelled"
 )
 
-// 任务类型枚举
-const (
-	TaskTypeSubtitle  = "subtitle"
-	TaskTypeRepair    = "repair"
-	TaskTypeTranslate = "translate"
-)
+	// 任务类型枚举
+	const (
+		TaskTypeSubtitle     = "subtitle"
+		TaskTypeSubtitleBurn = "subtitle_burn"
+		TaskTypeDeblur       = "deblur"
+		TaskTypeRepair       = "repair"
+		TaskTypeTranslate    = "translate"
+	)
 
 // Task 字幕/修复任务数据模型
 type Task struct {
 	BaseModel
 	VideoID     string `gorm:"type:char(36);not null;index:idx_task_video_id;comment:关联视频ID" json:"video_id"`
-	TaskType    string `gorm:"type:varchar(32);not null;default:'subtitle';index:idx_task_task_type;comment:任务类型 subtitle/repair" json:"task_type"`
+		TaskType    string `gorm:"type:varchar(32);not null;default:'subtitle';index:idx_task_task_type;comment:任务类型 subtitle/subtitle_burn/deblur/translate" json:"task_type"`
 	Status      string `gorm:"type:varchar(32);not null;default:'pending';index:idx_task_status;comment:任务状态 pending/running/completed/failed" json:"status"`
+	SourcePath  string `gorm:"type:varchar(1024);not null;default:'';comment:实际处理源文件路径，为空时使用关联视频路径" json:"source_path"`
 	Progress    int    `gorm:"default:0;comment:进度 0-100" json:"progress"`
 	ProgressMsg string `gorm:"type:text;comment:当前进度描述，如剩余时间、处理速度" json:"progress_msg"`
 	ResultJSON  string `gorm:"type:text;comment:ASR 结果 JSON" json:"-"`
@@ -219,6 +227,20 @@ func TaskUpdateFailedTx(tx *gorm.DB, id string, errMsg string, retryCount int) e
 	}).Error
 }
 
+// TaskUpdateCancelledTx 在事务中将任务标记为已取消
+func TaskUpdateCancelledTx(tx *gorm.DB, id string, msg string) error {
+	updates := map[string]interface{}{
+		"status":     TaskStatusCancelled,
+		"progress":   0,
+		"error_msg":  msg,
+		"updated_at": time.Now().Unix(),
+	}
+	if msg != "" {
+		updates["progress_msg"] = msg
+	}
+	return tx.Model(&Task{}).Where("id = ?", id).Updates(updates).Error
+}
+
 // TaskResetFailedTx 在事务中将失败任务重置为 pending（手动重试或调度器停止时回退）
 func TaskResetFailedTx(tx *gorm.DB, id string) error {
 	return tx.Model(&Task{}).Where("id = ?", id).Updates(map[string]interface{}{
@@ -252,7 +274,8 @@ func TaskDelete(ctx context.Context, id string) error {
 	return nil
 }
 
-// TaskMarkRunningAsFailed 将所有 running 状态的任务标记为失败，用于程序重启时的优雅关闭
+// TaskMarkRunningAsFailed 将所有 running 状态的任务标记为失败，
+// 用于程序优雅关闭（收到终止信号）以及重启时清理上次非正常退出残留的任务。
 func TaskMarkRunningAsFailed(ctx context.Context, reason string) (int64, error) {
 	result := DB.WithContext(ctx).Model(&Task{}).
 		Where("status = ?", TaskStatusRunning).

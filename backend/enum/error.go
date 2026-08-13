@@ -53,10 +53,11 @@ var (
 
 	// 任务相关错误
 	ErrTaskNotFound            = NewBizError(10070001, "任务不存在", 404)
-	ErrTaskNotFailed           = NewBizError(10070002, "只有失败任务可以重试", 400)
+	ErrTaskNotFailed           = NewBizError(10070002, "仅失败或已取消的任务可以重试", 400)
 	ErrTaskRunningCannotDelete = NewBizError(10070003, "运行中的任务不能删除", 400)
 	ErrTaskNotCompleted        = NewBizError(10070004, "任务尚未完成，无法导出字幕", 400)
 	ErrTaskNoResult            = NewBizError(10070005, "任务暂无可用字幕结果", 404)
+	ErrTaskNotCancelable       = NewBizError(10070006, "仅等待中或运行中的任务可以取消", 400)
 	ErrSubtitleNotCompleted    = NewBizError(10040002, "请先完成字幕生成", 400)
 
 	// 字幕导出相关错误

@@ -18,8 +18,20 @@ export interface Video {
   created_at: number
   updated_at: number
   subtitle_task?: TaskSnapshot
-  repair_task?: TaskSnapshot
-  // translate_task?: TaskSnapshot
+  subtitle_burn_task?: TaskSnapshot
+  deblur_task?: TaskSnapshot
+  output_dir?: string
+  output_files?: OutputFile[]
+}
+
+// 输出目录中的文件信息
+export interface OutputFile {
+  name: string
+  path?: string
+  size: number
+  is_video: boolean
+  file_type: 'subtitle' | 'translated' | 'subtitled_video' | 'repaired_video' | 'unknown'
+  updated_at: number
 }
 
 // 分页响应

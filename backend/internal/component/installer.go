@@ -13,11 +13,6 @@ import (
 type InstallParams struct {
 	ComponentType ComponentType `json:"component_type"`
 	Action        string        `json:"action"` // install, reinstall, uninstall
-	// Whisper ASR 参数
-	ASREngine string `json:"asr_engine,omitempty"` // openai_whisper, faster_whisper, whisperx
-	ASRModel  string `json:"asr_model,omitempty"`  // base, small, medium, large-v3...
-	ASRDevice string `json:"asr_device,omitempty"` // cpu, cuda
-	HFToken   string `json:"hf_token,omitempty"`   // for whisperx
 }
 
 // ProgressEvent 进度事件

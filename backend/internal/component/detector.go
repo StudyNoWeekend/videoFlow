@@ -30,7 +30,6 @@ func (d *Detector) DetectAll(ctx context.Context) []ComponentInfo {
 
 	results = append(results, d.detectDocker(ctx))
 	results = append(results, d.detectFFmpeg(ctx))
-	results = append(results, d.detectWhisperASR(ctx))
 	results = append(results, d.detectLada(ctx))
 
 	d.mu.Lock()
@@ -55,8 +54,6 @@ func (d *Detector) GetComponentStatus(ctx context.Context, componentType Compone
 		return d.detectDocker(ctx)
 	case ComponentFFmpeg:
 		return d.detectFFmpeg(ctx)
-	case ComponentWhisperASR:
-		return d.detectWhisperASR(ctx)
 	case ComponentLada:
 		return d.detectLada(ctx)
 	default:
@@ -124,33 +121,6 @@ func (d *Detector) detectFFmpeg(ctx context.Context) ComponentInfo {
 	}
 
 	info.Version = parseFFmpegVersion(version)
-	info.Status = StatusInstalled
-	return info
-}
-
-func (d *Detector) detectWhisperASR(ctx context.Context) ComponentInfo {
-	info := ComponentInfo{
-		Type:        ComponentWhisperASR,
-		Name:        "Whisper ASR",
-		Description: "Speech recognition service for generating subtitles",
-		NeedsDocker: true,
-	}
-
-	// Check if the whisper-asr container exists and is running
-	out, err := runCommand(ctx, "docker", "ps", "--filter", "name=whisper-asr-webservice", "--format", "{{.ID}}")
-	if err != nil || strings.TrimSpace(out) == "" {
-		info.Status = StatusMissing
-		return info
-	}
-
-	// Check container status
-	statusOut, err := runCommand(ctx, "docker", "ps", "--filter", "name=whisper-asr-webservice", "--format", "{{.Status}}")
-	if err != nil || !strings.HasPrefix(strings.ToLower(strings.TrimSpace(statusOut)), "up") {
-		info.Status = StatusError
-		info.ErrorMsg = "Container is not running"
-		return info
-	}
-
 	info.Status = StatusInstalled
 	return info
 }

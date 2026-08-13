@@ -2,10 +2,10 @@ import request, { type ApiResponse } from './request'
 import type { Video } from './video'
 
 // 任务类型
-export type TaskType = 'subtitle' | 'repair' // | 'translate'
+export type TaskType = 'subtitle' | 'subtitle_burn' | 'deblur' | 'translate'
 
 // 任务状态
-export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed'
+export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelling' | 'cancelled'
 
 // 任务信息
 export interface Task {
@@ -13,6 +13,7 @@ export interface Task {
   video_id: string
   task_type: TaskType
   status: TaskStatus
+  source_path?: string
   progress: number
   progress_msg?: string
   result?: unknown
@@ -35,16 +36,23 @@ export interface TaskListRes {
 export interface TaskCreateReq {
   video_id: string
   task_type: TaskType
+  /** 可选：实际处理源文件路径，为空时默认使用关联视频 */
+  source_path?: string
 }
 
 /**
  * 创建任务
  * @param videoId 视频 ID
  * @param taskType 任务类型
+ * @param sourcePath 可选：实际处理源文件路径，为空时默认使用关联视频
  */
-export function createTask(videoId: string, taskType: TaskType): Promise<Task> {
+export function createTask(videoId: string, taskType: TaskType, sourcePath?: string): Promise<Task> {
   return request
-    .post<ApiResponse<Task>>('/api/v1/tasks', { video_id: videoId, task_type: taskType })
+    .post<ApiResponse<Task>>('/api/v1/tasks', {
+      video_id: videoId,
+      task_type: taskType,
+      ...(sourcePath ? { source_path: sourcePath } : {}),
+    })
     .then((res) => res.data.data)
 }
 
@@ -69,6 +77,16 @@ export function listTasks(page: number, pageSize: number, type?: TaskType): Prom
 export function retryTask(id: string): Promise<Task> {
   return request
     .post<ApiResponse<Task>>(`/api/v1/tasks/${id}/retry`)
+    .then((res) => res.data.data)
+}
+
+/**
+ * 取消任务：等待中直接取消，运行中会中断正在执行的逻辑
+ * @param id 任务 ID
+ */
+export function cancelTask(id: string): Promise<Task> {
+  return request
+    .post<ApiResponse<Task>>(`/api/v1/tasks/${id}/cancel`)
     .then((res) => res.data.data)
 }
 

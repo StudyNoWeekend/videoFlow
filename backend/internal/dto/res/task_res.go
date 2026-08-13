@@ -6,6 +6,7 @@ type TaskRes struct {
 	VideoID     string      `json:"video_id"`
 	TaskType    string      `json:"task_type"`
 	Status      string      `json:"status"`
+	SourcePath  string      `json:"source_path,omitempty"` // 实际处理源文件路径，空表示使用关联视频
 	Progress    int         `json:"progress"`
 	ProgressMsg string      `json:"progress_msg,omitempty"`
 	Result      interface{} `json:"result,omitempty"`
