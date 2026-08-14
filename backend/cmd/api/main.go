@@ -62,6 +62,11 @@ func main() {
 		log.Fatalf("初始化视频修复执行器失败: %v", err)
 	}
 
+	// 若数据库中已持久化视频修复配置，则覆盖配置文件默认值（出错不阻断启动）
+	if err := logic.NewSettingLogic().ApplyRepairFromSettings(context.Background()); err != nil {
+		log.Printf("加载已保存的视频修复配置失败（将使用默认配置）: %v", err)
+	}
+
 	// 启动任务调度器
 	taskScheduler := scheduler.NewTaskScheduler(model.DB)
 	// 注册到全局实例，供任务取消等业务逻辑调用
