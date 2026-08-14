@@ -150,7 +150,7 @@ func InitConfig() (*AppConfig, error) {
 
 	// 后端端口固定为 8080，不允许通过环境变量或配置文件修改
 	// Docker 容器内通过 nginx 反向代理，仅暴露前端端口
-	cfg.HTTP.Port = 8180
+	cfg.HTTP.Port = 8080
 
 	Config = cfg
 	return cfg, nil
