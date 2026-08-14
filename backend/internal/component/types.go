@@ -4,9 +4,10 @@ package component
 type ComponentType string
 
 const (
-	ComponentDocker ComponentType = "docker"
-	ComponentFFmpeg ComponentType = "ffmpeg"
-	ComponentLada   ComponentType = "lada"
+	ComponentDocker     ComponentType = "docker"
+	ComponentFFmpeg     ComponentType = "ffmpeg"
+	ComponentWhisperASR ComponentType = "whisper_asr"
+	ComponentLada       ComponentType = "lada"
 )
 
 // ComponentStatus 组件状态

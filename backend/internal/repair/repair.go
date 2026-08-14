@@ -3,6 +3,8 @@ package repair
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +16,11 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
+
+	"go.uber.org/zap"
+
+	"video-captions/utils/logger"
 )
 
 // Config 视频修复 Docker 配置
@@ -216,6 +223,94 @@ func resolveHostPathViaMountinfo(containerPath string) string {
 	return containerPath
 }
 
+// isContainerNameChar 判断字符是否可用于 Docker 容器名（[a-zA-Z0-9_.-]）
+func isContainerNameChar(r rune) bool {
+	switch {
+	case r >= 'a' && r <= 'z':
+		return true
+	case r >= 'A' && r <= 'Z':
+		return true
+	case r >= '0' && r <= '9':
+		return true
+	case r == '.' || r == '_' || r == '-':
+		return true
+	}
+	return false
+}
+
+// sanitizeContainerName 将视频文件名转换为合法的 Docker 容器名（不含 "_lada" 后缀）。
+// 仅保留 [a-zA-Z0-9_.-]，中文等非法字符替换为 "_"；trim 首尾的 "._-"；
+// 空名或首位非字母数字时补充 "repair_" 前缀；容器名以字母或数字开头。
+// 若原文件名含非法字符（被改写），追加 videoPath 的 sha256 短哈希避免不同目录同名文件冲突。
+func sanitizeContainerName(baseName, videoPath string) string {
+	name := strings.TrimSuffix(baseName, filepath.Ext(baseName))
+
+	var b strings.Builder
+	for _, r := range name {
+		if isContainerNameChar(r) {
+			b.WriteRune(r)
+		} else {
+			b.WriteByte('_')
+		}
+	}
+	sanitized := strings.Trim(b.String(), "._-")
+
+	// 空名（如 ".mp4" 这类隐藏文件）时补充占位名
+	if sanitized == "" {
+		sanitized = "repair"
+	}
+
+	// 全 ASCII 且合法时保持原名，便于识别
+	if sanitized == name {
+		return sanitized
+	}
+
+	// 含非法字符：追加路径哈希保证唯一性
+	sum := sha256.Sum256([]byte(videoPath))
+	suffix := "_" + hex.EncodeToString(sum[:4])
+
+	const maxBaseLen = 64
+	if len(sanitized) > maxBaseLen {
+		sanitized = sanitized[:maxBaseLen]
+	}
+	// Docker 容器名必须以字母或数字开头
+	if first := sanitized[0]; !((first >= 'a' && first <= 'z') || (first >= 'A' && first <= 'Z') || (first >= '0' && first <= '9')) {
+		sanitized = "repair_" + sanitized
+	}
+	return sanitized + suffix
+}
+
+// stopAndRemoveContainer 停止并移除指定名称的 Docker 容器（docker rm -f）。
+// 用于任务取消后的清理：取消任务会杀死 docker run 客户端进程，但 Docker daemon 中
+// 正在运行的容器不会随之停止，--rm 仅在容器自行退出后生效，因此需显式清理被孤立的容器。
+//
+// 使用独立的带超时 context（任务 context 此时已被取消，直接使用会导致清理命令立即失败）。
+// 对 "No such container"（容器已正常退出并被 --rm 清理）静默忽略，幂等且不阻断流程。
+func stopAndRemoveContainer(containerName string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "docker", "rm", "-f", containerName)
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		logger.Logger.Info("已清理被孤立的修复容器",
+			zap.String("container", containerName),
+			zap.String("output", strings.TrimSpace(string(out))),
+		)
+		return
+	}
+
+	// 容器已不存在（正常退出后被 --rm 清理）属预期情况，静默忽略
+	if strings.Contains(strings.ToLower(string(out)), "no such container") {
+		return
+	}
+	logger.Logger.Warn("清理被孤立的修复容器失败",
+		zap.String("container", containerName),
+		zap.String("output", strings.TrimSpace(string(out))),
+		zap.Error(err),
+	)
+}
+
 // Execute 在本地执行视频修复命令，并通过 onProgress 实时回调进度。
 // 返回命令完整输出（stdout + stderr）以及可能的错误。
 func (e *Executor) Execute(ctx context.Context, videoPath string, onProgress ProgressCallback) (output string, err error) {
@@ -230,21 +325,29 @@ func (e *Executor) Execute(ctx context.Context, videoPath string, onProgress Pro
 	// 通过宿主机的 Docker daemon 启动 Lada 容器时，bind mount 的 src 必须是宿主机路径
 	hostParentDir := resolveHostPath(parentDir)
 
-// 用文件名称作为容器名称，方便识别
-		containerName := strings.TrimSuffix(baseName, filepath.Ext(baseName)) + "_lada"
+	// 用文件（净化后的）名称作为容器名称，方便识别。
+	// Docker 容器名只允许 [a-zA-Z0-9][a-zA-Z0-9_.-]*，中文等字符需转义并追加哈希避免重名
+	containerName := sanitizeContainerName(baseName, videoPath) + "_lada"
 
-		args := []string{
-			"run", "--rm",
-			"--name", containerName,
-			"--mount", fmt.Sprintf("type=bind,src=%s,dst=/mnt", hostParentDir),
-			cfg.DockerImage,
-			"--input", "/mnt/" + baseName,
-			"--device", cfg.Device,
-		}
+	args := []string{
+		"run", "--rm",
+		"--name", containerName,
+		"--mount", fmt.Sprintf("type=bind,src=%s,dst=/mnt", hostParentDir),
+		cfg.DockerImage,
+		"--input", "/mnt/" + baseName,
+		"--device", cfg.Device,
+	}
 
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	out, err := streamCommand(cmd, onProgress)
 	output = string(out)
+
+	// 任务被取消时，docker run 客户端进程会被杀死，但 Docker daemon 中的 LADA 容器
+	// 仍会继续运行，--rm 仅在容器自行退出后生效，无法清理被孤立的容器，此处显式清理。
+	if ctx.Err() != nil {
+		stopAndRemoveContainer(containerName)
+	}
+
 	if err != nil {
 		return output, fmt.Errorf("修复命令执行失败: %w", err)
 	}

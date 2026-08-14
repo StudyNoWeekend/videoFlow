@@ -24,7 +24,9 @@ const form = ref<Setting>({
   repair_docker_image: '',
   repair_device: 'cpu',
   subtitle_concurrency: 2,
+  subtitle_burn_concurrency: 1,
   repair_concurrency: 1,
+  translate_concurrency: 1,
 })
 const saving = ref(false)
 
@@ -164,8 +166,14 @@ onMounted(async () => {
                   <el-form-item :label="$t('settings.label.subtitle_concurrency')">
                     <el-slider v-model="form.subtitle_concurrency" :min="1" :max="50" show-input />
                   </el-form-item>
+                  <el-form-item :label="$t('settings.label.subtitle_burn_concurrency')">
+                    <el-slider v-model="form.subtitle_burn_concurrency" :min="1" :max="50" show-input />
+                  </el-form-item>
                   <el-form-item :label="$t('settings.label.repair_concurrency')">
                     <el-slider v-model="form.repair_concurrency" :min="1" :max="50" show-input />
+                  </el-form-item>
+                  <el-form-item :label="$t('settings.label.translate_concurrency')">
+                    <el-slider v-model="form.translate_concurrency" :min="1" :max="50" show-input />
                   </el-form-item>
                 </div>
               </section>

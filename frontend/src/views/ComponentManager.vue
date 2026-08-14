@@ -326,32 +326,38 @@ onMounted(async () => {
         </div>
 
         <div class="cm-card__actions">
-          <template v-if="comp.status === 'installing'">
-            <el-button type="primary" size="small" @click="handleShowLog(comp)">
-              {{ $t('components.btn.progress') }}
-            </el-button>
-            <el-button type="warning" size="small" @click="handleReinstall(comp)">
-              {{ $t('components.btn.reinstall') }}
-            </el-button>
+          <!-- Whisper ASR: 仅展示检测状态，部署由用户在外部自行完成 -->
+          <template v-if="comp.type === 'whisper_asr'">
+            <el-text v-if="comp.status === 'missing' || comp.status === 'error'">{{ $t('components.whisper_not_deployed') }}</el-text>
           </template>
-          <template v-else-if="comp.status === 'missing' || comp.status === 'error'">
-            <el-button type="primary" size="small" @click="handleInstall(comp)">
-              {{ $t('components.btn.install') }}
-            </el-button>
-            <el-button v-if="comp.status === 'error'" type="warning" size="small" @click="handleReinstall(comp)">
-              {{ $t('components.btn.reinstall') }}
-            </el-button>
-          </template>
-          <template v-else-if="comp.status === 'installed'">
-            <el-button type="warning" size="small" @click="handleReinstall(comp)">
-              {{ $t('components.btn.reinstall') }}
-            </el-button>
-            <el-button type="danger" size="small" @click="handleUninstall(comp)">
-              {{ $t('components.btn.uninstall') }}
-            </el-button>
-            <el-button size="small" @click="handleShowLog(comp)">
-              {{ $t('components.btn.logs') }}
-            </el-button>
+          <template v-else>
+            <template v-if="comp.status === 'installing'">
+              <el-button type="primary" size="small" @click="handleShowLog(comp)">
+                {{ $t('components.btn.progress') }}
+              </el-button>
+              <el-button type="warning" size="small" @click="handleReinstall(comp)">
+                {{ $t('components.btn.reinstall') }}
+              </el-button>
+            </template>
+            <template v-else-if="comp.status === 'missing' || comp.status === 'error'">
+              <el-button type="primary" size="small" @click="handleInstall(comp)">
+                {{ $t('components.btn.install') }}
+              </el-button>
+              <el-button v-if="comp.status === 'error'" type="warning" size="small" @click="handleReinstall(comp)">
+                {{ $t('components.btn.reinstall') }}
+              </el-button>
+            </template>
+            <template v-else-if="comp.status === 'installed'">
+              <el-button type="warning" size="small" @click="handleReinstall(comp)">
+                {{ $t('components.btn.reinstall') }}
+              </el-button>
+              <el-button type="danger" size="small" @click="handleUninstall(comp)">
+                {{ $t('components.btn.uninstall') }}
+              </el-button>
+              <el-button size="small" @click="handleShowLog(comp)">
+                {{ $t('components.btn.logs') }}
+              </el-button>
+            </template>
           </template>
         </div>
       </div>

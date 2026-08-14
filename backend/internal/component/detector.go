@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os/exec"
 	"strings"
 	"sync"
 	"time"
 
+	"video-captions/internal/model"
 	"video-captions/internal/utils"
 )
 
@@ -30,6 +32,7 @@ func (d *Detector) DetectAll(ctx context.Context) []ComponentInfo {
 
 	results = append(results, d.detectDocker(ctx))
 	results = append(results, d.detectFFmpeg(ctx))
+	results = append(results, d.detectWhisperASR(ctx))
 	results = append(results, d.detectLada(ctx))
 
 	d.mu.Lock()
@@ -54,6 +57,8 @@ func (d *Detector) GetComponentStatus(ctx context.Context, componentType Compone
 		return d.detectDocker(ctx)
 	case ComponentFFmpeg:
 		return d.detectFFmpeg(ctx)
+	case ComponentWhisperASR:
+		return d.detectWhisperASR(ctx)
 	case ComponentLada:
 		return d.detectLada(ctx)
 	default:
@@ -121,6 +126,35 @@ func (d *Detector) detectFFmpeg(ctx context.Context) ComponentInfo {
 	}
 
 	info.Version = parseFFmpegVersion(version)
+	info.Status = StatusInstalled
+	return info
+}
+
+func (d *Detector) detectWhisperASR(ctx context.Context) ComponentInfo {
+	info := ComponentInfo{
+		Type:        ComponentWhisperASR,
+		Name:        "Whisper ASR",
+		Description: "Speech recognition service for generating subtitles",
+		NeedsDocker: true,
+	}
+
+	// 从 settings 表读取 ASR URL，验证服务是否可达
+	asrURL := model.SettingGet(ctx, model.SettingKeyASRURL)
+	if asrURL == "" {
+		info.Status = StatusError
+		info.ErrorMsg = "ASR URL is not configured"
+		return info
+	}
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get(asrURL)
+	if err != nil {
+		info.Status = StatusError
+		info.ErrorMsg = fmt.Sprintf("Service is not responding: %v", err)
+		return info
+	}
+	resp.Body.Close()
+
 	info.Status = StatusInstalled
 	return info
 }

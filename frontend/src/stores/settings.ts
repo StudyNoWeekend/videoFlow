@@ -17,7 +17,9 @@ const defaultSetting: Setting = {
   repair_docker_image: 'ladaapp/lada:latest',
   repair_device: 'cpu',
   subtitle_concurrency: 2,
+  subtitle_burn_concurrency: 1,
   repair_concurrency: 1,
+  translate_concurrency: 1,
 }
 
 // 设置中心 Store，管理统一配置对象

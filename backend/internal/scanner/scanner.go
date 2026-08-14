@@ -64,17 +64,29 @@ func (s *Scanner) Stop() {
 	logger.Logger.Info("视频目录扫描器已停止")
 }
 
-// loop 周期性扫描循环
+// loop 周期性扫描循环。每次扫描后会重新加载设置中的间隔，
+// 若间隔发生变化则重建 ticker，使新 interval 无需重启立即生效。
 func (s *Scanner) loop(ctx context.Context) {
 	defer s.wg.Done()
 
-	ticker := time.NewTicker(s.interval)
+	cur := s.interval
+	ticker := time.NewTicker(cur)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ticker.C:
 			s.runScan(ctx)
+			// runScan 内部已通过 loadInterval 刷新 s.interval，变化时重建 ticker
+			if s.interval != cur {
+				logger.Logger.Info("扫描间隔已调整，重建定时器",
+					zap.Duration("old_interval", cur),
+					zap.Duration("new_interval", s.interval),
+				)
+				cur = s.interval
+				ticker.Stop()
+				ticker = time.NewTicker(cur)
+			}
 		case <-ctx.Done():
 			return
 		}
