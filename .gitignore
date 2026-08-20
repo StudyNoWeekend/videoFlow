@@ -19,6 +19,7 @@ frontend/*.log
 .trae/
 .zcode/
 .vscode/
+.github/
 *.swp
 *.swo
 *~
