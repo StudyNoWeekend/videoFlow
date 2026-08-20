@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -385,11 +386,12 @@ func gpuFailureHint(output string) string {
 }
 
 var (
-	// progressRegex 匹配 docker 进度行中的百分比，例如 "Processing video:   5%|..."
-	progressRegex = regexp.MustCompile(`(\d+)%`)
+	// progressRegex 匹配 docker 进度行中的百分比，支持小数，例如 "5%"、"(0.21%)"。
+	// 使用 [\d.]+ 避免 "(0.21%)" 被误解析成 21（\d+ 只能匹配到 % 前的整数）。
+	progressRegex = regexp.MustCompile(`([\d.]+)%`)
 	// progressCleanupRegex 用于剔除 docker 进度条里的百分比与 ASCII 进度条，
 	// 保留 "Processed: ... | Remaining: ... | Speed: ..." 等可读信息。
-	progressCleanupRegex = regexp.MustCompile(`^.*?\d+%\|[^|]*\|\s*`)
+	progressCleanupRegex = regexp.MustCompile(`^.*?[\d.]+%\|[^|]*\|\s*`)
 )
 
 // parseProgressLine 从一行输出中解析进度百分比与进度消息。
@@ -403,10 +405,11 @@ func parseProgressLine(line string) (int, string) {
 	if len(matches) < 2 {
 		return -1, line
 	}
-	p, err := strconv.Atoi(matches[1])
-	if err != nil || p < 0 || p > 100 {
+	f, err := strconv.ParseFloat(matches[1], 64)
+	if err != nil || f < 0 || f > 100 {
 		return -1, line
 	}
+	p := int(math.Round(f))
 
 	// 清理进度条前缀，让 progress_msg 更接近 "Processed/Remaining/Speed"
 	msg := line
