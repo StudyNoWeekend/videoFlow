@@ -2,10 +2,11 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useI18n } from 'vue-i18n'
-import { listVideos, scanVideos, deleteVideo } from '@/api/video'
+import { listVideos, scanVideos, deleteVideo, listDirFiles } from '@/api/video'
 import { createTask } from '@/api/task'
 import type { Video, TaskSnapshot, OutputFile } from '@/api/video'
 import SourceSelectDialog, { type SourceSelectOption } from '@/components/SourceSelectDialog.vue'
+import UpscaleDialog from '@/components/UpscaleDialog.vue'
 import { useSettingsStore } from '@/stores/settings'
 import { formatDuration, formatFileSize } from '@/utils/format'
 
@@ -26,6 +27,12 @@ const sourceDialogVisible = ref<boolean>(false)
 const sourceDialogTitle = ref<string>('')
 const sourceDialogVideo = ref<Video | null>(null)
 const sourceDialogOptions = ref<SourceSelectOption[]>([])
+const sourceDialogTaskType = ref<string>('deblur')
+
+// 放大弹窗状态
+const upscaleDialogVisible = ref<boolean>(false)
+const upscaleDialogVideo = ref<Video | null>(null)
+const upscaleDialogFiles = ref<Array<{name: string, path: string, width: number, height: number, size: number, fileType: string}>>([])
 
 // 轮询间隔选项（毫秒），0 表示不轮询
 const pollingOptions = [
@@ -109,6 +116,17 @@ async function pollVideos(): Promise<void> {
             existing.deblur_task = incoming.deblur_task
           }
         }
+        // 更新放大任务快照
+        if (incoming.upscale_task) {
+          if (existing.upscale_task) {
+            existing.upscale_task.status = incoming.upscale_task.status
+            existing.upscale_task.progress = incoming.upscale_task.progress
+            existing.upscale_task.error_msg = incoming.upscale_task.error_msg
+            existing.upscale_task.updated_at = incoming.upscale_task.updated_at
+          } else {
+            existing.upscale_task = incoming.upscale_task
+          }
+        }
       }
     }
     total.value = res.total
@@ -167,13 +185,32 @@ async function handleSubtitle(video: Video): Promise<void> {
 
 async function handleSubtitleBurn(video: Video): Promise<void> {
   if (isTaskRunning(video.subtitle_burn_task)) return
-  try {
-    await createTask(video.id, 'subtitle_burn')
-    ElMessage.success(t('videos.subtitle_burn.success'))
-    await loadVideos()
-  } catch {
-    // 请求失败已由拦截器提示
+
+  // 检测是否存在同名衍生视频（如去马赛克视频）；没有则直接对原视频执行
+  const derived = (video.output_files || []).filter((f) => f.is_video && f.path)
+  if (derived.length === 0) {
+    try {
+      await createTask(video.id, 'subtitle_burn')
+      ElMessage.success(t('videos.subtitle_burn.success'))
+      await loadVideos()
+    } catch {
+      // 请求失败已由拦截器提示
+    }
+    return
   }
+
+  // 有衍生视频：弹窗让用户选择处理源（原视频 / 衍生视频）
+  sourceDialogVideo.value = video
+  sourceDialogTitle.value = t('videos.dialog.subtitle_burn_title')
+  sourceDialogTaskType.value = 'subtitle_burn'
+  sourceDialogOptions.value = derived.map((f) => ({
+    name: f.name,
+    path: f.path!,
+    size: f.size,
+    labelKey: getFileTypeLabel(f),
+    tag: getFileTypeTag(f),
+  }))
+  sourceDialogVisible.value = true
 }
 
 async function handleDeblur(video: Video): Promise<void> {
@@ -197,6 +234,7 @@ async function handleDeblur(video: Video): Promise<void> {
   // 有衍生视频：弹窗让用户选择处理源（原视频 / 衍生视频）
   sourceDialogVideo.value = video
   sourceDialogTitle.value = t(titleKey)
+  sourceDialogTaskType.value = 'deblur'
   sourceDialogOptions.value = derived.map((f) => ({
     name: f.name,
     path: f.path!,
@@ -207,17 +245,47 @@ async function handleDeblur(video: Video): Promise<void> {
   sourceDialogVisible.value = true
 }
 
+async function handleUpscale(video: Video): Promise<void> {
+  if (isTaskRunning(video.upscale_task)) return
+  try {
+    const files = await listDirFiles(video.id)
+    upscaleDialogVideo.value = video
+    upscaleDialogFiles.value = files
+    upscaleDialogVisible.value = true
+  } catch {
+    // error handled by interceptor
+  }
+}
+
 // 弹窗确认：以用户选择的视频为处理源创建任务（path 为空串表示原视频）
 async function handleSourceConfirm(path: string): Promise<void> {
   const video = sourceDialogVideo.value
   if (!video) return
+  const taskType = sourceDialogTaskType.value
   sourceDialogVideo.value = null
   try {
-    await createTask(video.id, 'deblur', path || undefined)
-    ElMessage.success(t('videos.deblur.success'))
+    await createTask(video.id, taskType as TaskType, path || undefined)
+    if (taskType === 'deblur') {
+      ElMessage.success(t('videos.deblur.success'))
+    } else {
+      ElMessage.success(t('videos.subtitle_burn.success'))
+    }
     await loadVideos()
   } catch {
     // 请求失败已由拦截器提示
+  }
+}
+
+async function handleUpscaleConfirm(payload: { sourcePath: string, targetWidth: number, targetHeight: number, processor: string, model: string, noiseLevel: number }): Promise<void> {
+  const video = upscaleDialogVideo.value
+  if (!video) return
+  upscaleDialogVideo.value = null
+  try {
+    await createTask(video.id, 'upscale', payload.sourcePath, payload.targetWidth, payload.targetHeight, payload.processor, payload.model, payload.noiseLevel)
+    ElMessage.success(t('videos.upscale.success'))
+    await loadVideos()
+  } catch {
+    // handled by interceptor
   }
 }
 
@@ -235,13 +303,13 @@ function taskStatusText(task?: TaskSnapshot): string {
 }
 
 // 输出文件类型标签配置
-const fileTypeLabels: Record<string, { label: string; tag: string }> = {
-  subtitle:        { label: 'videos.file.subtitle',        tag: 'primary' },
-  translated:      { label: 'videos.file.translated',      tag: 'success' },
-  subtitled_video: { label: 'videos.file.subtitled_video', tag: 'warning' },
-  repaired_video:  { label: 'videos.file.repaired_video',  tag: 'danger' },
-  unknown:         { label: 'videos.file.unknown',         tag: 'info' },
-}
+	const fileTypeLabels: Record<string, { label: string; tag: string }> = {
+		  subtitle:        { label: 'videos.file.subtitle',        tag: 'primary' },
+		  subtitled_video: { label: 'videos.file.subtitled_video', tag: 'warning' },
+		  repaired_video:  { label: 'videos.file.repaired_video',  tag: 'danger' },
+		  upscaled_video:  { label: 'videos.file.upscaled_video',  tag: 'success' },
+		  unknown:         { label: 'videos.file.unknown',         tag: 'info' },
+		}
 
 function getFileTypeLabel(file: OutputFile): string {
   return fileTypeLabels[file.file_type]?.label ?? 'videos.file.unknown'
@@ -435,6 +503,24 @@ onUnmounted(() => {
             </template>
           </el-table-column>
 
+          <el-table-column :label="$t('videos.column.upscale')" width="100">
+            <template #default="{ row }">
+              <template v-if="!isOutputRow(row)">
+                <div class="status-cell">
+                  <span :class="['vf-led', taskStatusLed((row as Video).upscale_task)]"></span>
+                  <span class="status-text">{{ taskStatusText((row as Video).upscale_task) }}</span>
+                </div>
+                <el-progress
+                  v-if="(row as Video).upscale_task"
+                  :percentage="(row as Video).upscale_task!.progress"
+                  :status="(row as Video).upscale_task!.status === 'failed' ? 'exception' : (row as Video).upscale_task!.status === 'completed' ? 'success' : ''"
+                  :stroke-width="4"
+                  class="signal-progress"
+                />
+              </template>
+            </template>
+          </el-table-column>
+
           <el-table-column :label="$t('videos.column.action')" width="350" fixed="right">
             <template #default="{ row }">
               <template v-if="!isOutputRow(row)">
@@ -465,6 +551,15 @@ onUnmounted(() => {
                 >
                   {{ $t('videos.btn.deblur') }}
                 </el-button>
+                <el-button
+                  type="success"
+                  size="small"
+                  :disabled="isTaskRunning((row as Video).upscale_task)"
+                  :loading="(row as Video).upscale_task?.status === 'running'"
+                  @click="handleUpscale(row as Video)"
+                >
+                  {{ $t('videos.btn.upscale') }}
+                </el-button>
                 <el-button type="danger" size="small" @click="handleDelete(row as Video)">{{ $t('videos.btn.delete') }}</el-button>
               </template>
             </template>
@@ -493,9 +588,17 @@ onUnmounted(() => {
     <SourceSelectDialog
       v-model="sourceDialogVisible"
       :title="sourceDialogTitle"
+      :tipKey="sourceDialogTaskType === 'subtitle_burn' ? 'videos.source.subtitle_burn_tip' : 'videos.source.tip'"
       :video-name="sourceDialogVideo?.name || ''"
       :options="sourceDialogOptions"
       @confirm="handleSourceConfirm"
+    />
+
+    <UpscaleDialog
+      v-model="upscaleDialogVisible"
+      :video-name="upscaleDialogVideo?.name || ''"
+      :files="upscaleDialogFiles"
+      @confirm="handleUpscaleConfirm"
     />
   </div>
 </template>

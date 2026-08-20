@@ -103,3 +103,20 @@ func (ctl *VideoController) Delete(c *gin.Context) {
 	}
 	response.Success(c, nil)
 }
+
+// DirFiles 获取视频输出目录下所有视频文件的详细信息，包括分辨率
+// GET /api/v1/videos/:id/dir-files
+func (ctl *VideoController) DirFiles(c *gin.Context) {
+	id := c.Param("id")
+	if id == "" {
+		response.FailByBizError(c, enum.ErrInvalidParam)
+		return
+	}
+
+	res, err := ctl.videoLogic.DirFiles(c.Request.Context(), id)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	response.Success(c, res)
+}

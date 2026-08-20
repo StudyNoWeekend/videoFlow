@@ -21,9 +21,12 @@ const props = withDefaults(
     videoName: string
     /** 可选的处理源（同名衍生视频），为空时不弹窗直接走原视频 */
     options: SourceSelectOption[]
+    /** 提示文字 i18n key，默认为去马赛克专用提示 */
+    tipKey?: string
   }>(),
   {
     options: () => [],
+    tipKey: 'videos.source.tip',
   },
 )
 
@@ -65,7 +68,7 @@ function handleConfirm(): void {
     destroy-on-close
   >
     <div class="source-select">
-      <div class="source-select__tip">{{ $t('videos.source.tip') }}</div>
+      <div class="source-select__tip">{{ $t(props.tipKey) }}</div>
       <el-radio-group v-model="selectedPath" class="source-select__group">
         <!-- 原视频（默认） -->
         <el-radio class="source-select__item" value="" border>

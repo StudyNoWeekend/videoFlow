@@ -90,8 +90,9 @@ func (l *VideoLogic) ScanDir(ctx context.Context, scanReq *req.VideoScanReq) (*r
 			return nil
 		}
 
-			duration := getVideoDuration(ctx, filePath)
-			_, upsertErr := model.VideoUpsertByPath(ctx, filePath, fileInfo.Size(), duration)
+		duration := getVideoDuration(ctx, filePath)
+		width, height := getVideoResolution(ctx, filePath)
+		_, upsertErr := model.VideoUpsertByPath(ctx, filePath, fileInfo.Size(), duration, width, height)
 		if upsertErr != nil {
 			return upsertErr
 		}
@@ -118,9 +119,10 @@ func (l *VideoLogic) List(ctx context.Context, listReq *req.VideoListReq) (*res.
 	list := make([]*res.VideoRes, 0, len(videos))
 	for _, v := range videos {
 		videoRes := videoModelToRes(v)
-			videoRes.SubtitleTask = taskSnapshotByVideoIDAndType(ctx, v.ID, model.TaskTypeSubtitle)
-			videoRes.SubtitleBurnTask = taskSnapshotByVideoIDAndType(ctx, v.ID, model.TaskTypeSubtitleBurn)
-			videoRes.DeblurTask = taskSnapshotByVideoIDAndType(ctx, v.ID, model.TaskTypeDeblur)
+		videoRes.SubtitleTask = taskSnapshotByVideoIDAndType(ctx, v.ID, model.TaskTypeSubtitle)
+		videoRes.SubtitleBurnTask = taskSnapshotByVideoIDAndType(ctx, v.ID, model.TaskTypeSubtitleBurn)
+		videoRes.DeblurTask = taskSnapshotByVideoIDAndType(ctx, v.ID, model.TaskTypeDeblur)
+		videoRes.UpscaleTask = taskSnapshotByVideoIDAndType(ctx, v.ID, model.TaskTypeUpscale)
 		videoRes.OutputDir = outputDirPath(v)
 		videoRes.OutputFiles = listOutputFiles(v)
 		list = append(list, videoRes)
@@ -181,6 +183,8 @@ func videoModelToRes(v *model.Video) *res.VideoRes {
 		ID:        v.ID,
 		Path:      v.Path,
 		Name:      v.Name,
+		Width:     v.Width,
+		Height:    v.Height,
 		Duration:  v.Duration,
 		Size:      v.Size,
 		CreatedAt: v.CreatedAt,
@@ -199,6 +203,19 @@ func getVideoDuration(ctx context.Context, path string) int64 {
 		return 0
 	}
 	return int64(duration)
+}
+
+// getVideoResolution 通过 ffmpeg 获取视频分辨率，失败时返回 0,0 并仅记录日志
+func getVideoResolution(ctx context.Context, path string) (int, int) {
+	w, h, err := ffmpeg.GetResolution(ctx, path)
+	if err != nil {
+		logger.Logger.Warn("获取视频分辨率失败",
+			zap.String("path", path),
+			zap.Error(err),
+		)
+		return 0, 0
+	}
+	return w, h
 }
 
 // taskSnapshotByVideoIDAndType 查询并转换指定视频的最新指定类型任务快照
@@ -252,7 +269,7 @@ func listOutputFiles(v *model.Video) []*res.OutputFileRes {
 		if err != nil {
 			continue
 		}
-		// 跳过原始视频的硬链接副本（修复任务创建的），避免重复
+		// 跳过原始视频的硬链接副本（去马赛克任务创建的），避免重复
 		if e.Name() == v.Name {
 			continue
 		}
@@ -268,6 +285,81 @@ func listOutputFiles(v *model.Video) []*res.OutputFileRes {
 	return files
 }
 
+// DirFileInfo 输出目录中视频文件的详细信息，包含分辨率
+type DirFileInfo struct {
+	Name      string `json:"name"`
+	Path      string `json:"path"`
+	Size      int64  `json:"size"`
+	Width     int    `json:"width"`
+	Height    int    `json:"height"`
+	FileType  string `json:"file_type"`
+	UpdatedAt int64  `json:"updated_at"`
+}
+
+// DirFiles 获取视频输出目录下所有视频文件（含原视频）的详细信息，附带分辨率
+func (l *VideoLogic) DirFiles(ctx context.Context, videoID string) ([]*DirFileInfo, error) {
+	video, err := model.VideoGetByID(ctx, videoID)
+	if err != nil {
+		return nil, enum.ErrDatabase.WithMsg(fmt.Sprintf("获取视频失败: %v", err))
+	}
+	if video == nil {
+		return nil, enum.ErrNotFound
+	}
+
+	outputDir := outputDirPath(video)
+	files := make([]*DirFileInfo, 0)
+
+	// 把原始视频加入候选列表
+	files = append(files, &DirFileInfo{
+		Name:      video.Name,
+		Path:      video.Path,
+		Size:      video.Size,
+		Width:     video.Width,
+		Height:    video.Height,
+		FileType:  "original",
+		UpdatedAt: video.UpdatedAt,
+	})
+
+	// 读取输出目录中的其他视频文件
+	entries, err := os.ReadDir(outputDir)
+	if err != nil {
+		// 输出目录不存在也没关系，至少返回原视频
+		logger.Logger.Warn("读取输出目录失败", zap.String("dir", outputDir), zap.Error(err))
+		return files, nil
+	}
+
+	videoExt := filepath.Ext(video.Path)
+	baseName := strings.TrimSuffix(video.Name, videoExt)
+
+	for _, e := range entries {
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		// 跳过原始视频本身（已在上面添加）
+		if e.Name() == video.Name {
+			continue
+		}
+		// 只关注视频文件
+		if !model.IsVideoFile(e.Name()) {
+			continue
+		}
+
+		filePath := filepath.Join(outputDir, e.Name())
+		w, h := getVideoResolution(ctx, filePath)
+		files = append(files, &DirFileInfo{
+			Name:      e.Name(),
+			Path:      filePath,
+			Size:      info.Size(),
+			Width:     w,
+			Height:    h,
+			FileType:  classifyOutputFile(e.Name(), baseName),
+			UpdatedAt: info.ModTime().Unix(),
+		})
+	}
+	return files, nil
+}
+
 // classifyOutputFile 根据文件名和视频原名判断输出文件的类型
 func classifyOutputFile(fileName, videoBaseName string) string {
 	name := strings.ToLower(fileName)
@@ -279,29 +371,29 @@ func classifyOutputFile(fileName, videoBaseName string) string {
 		return "subtitle"
 	}
 
-	// 翻译字幕：<video>_translated.srt
-	if ext == ".srt" && strings.HasSuffix(base, "_translated") {
-		return "translated"
-	}
-
 	// 字幕合成视频：<video>_subtitled.<ext>
 	if model.IsVideoFile(fileName) && strings.HasSuffix(base, "_subtitled") {
 		return "subtitled_video"
 	}
 
 	// 去马赛克输出视频：含 repaired / denoised / restored / enhanced / deblurred / deblur 等特征
-		if model.IsVideoFile(fileName) {
-			if strings.Contains(base, "repaired") ||
-				strings.Contains(base, "denoised") ||
-				strings.Contains(base, "restored") ||
-				strings.Contains(base, "enhanced") ||
-				strings.Contains(base, "deblurred") ||
-				strings.Contains(base, "deblur") ||
-				strings.HasPrefix(base, "repaired_") ||
-				strings.HasPrefix(base, "fixed_") {
-				return "repaired_video"
-			}
+	if model.IsVideoFile(fileName) {
+		if strings.Contains(base, "repaired") ||
+			strings.Contains(base, "denoised") ||
+			strings.Contains(base, "restored") ||
+			strings.Contains(base, "enhanced") ||
+			strings.Contains(base, "deblurred") ||
+			strings.Contains(base, "deblur") ||
+			strings.HasPrefix(base, "repaired_") ||
+			strings.HasPrefix(base, "fixed_") {
+			return "repaired_video"
 		}
+	}
+
+	// 清晰度修复输出视频：含 _upscaled_ 特征
+	if model.IsVideoFile(fileName) && strings.Contains(base, "_upscaled") {
+		return "upscaled_video"
+	}
 
 	return "unknown"
 }

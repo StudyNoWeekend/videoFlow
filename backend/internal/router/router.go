@@ -8,6 +8,8 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"video-captions/bootstrap"
+	"video-captions/internal/logic"
+	"video-captions/internal/middleware"
 	"video-captions/utils/response"
 )
 
@@ -25,20 +27,26 @@ func SetupRouter(cfg *bootstrap.AppConfigHTTP) *gin.Engine {
 	r.Use(corsMiddleware())
 	r.Use(loggerMiddleware())
 
-	// 注册健康检查路由
+	// ---- 公开路由（无需认证） ----
+	// 健康检查
 	RegisterHealthRouter(r)
+	// 认证相关（登录、初始化、验证码等）
+	RegisterAuthRouter(r)
+	// 版本号（公开接口）
+	RegisterVersionRouter(r)
+	// 组件安装进度 SSE（公开接口，EventSource 不支持自定义 header，无法传 token）
+	RegisterComponentProgressRouter(r)
 
-	// 注册视频管理路由
-	RegisterVideoRouter(r)
-
-	// 注册任务管理路由
-	RegisterTaskRouter(r)
-
-	// 注册运行时配置路由
-	RegisterSettingRouter(r)
-
-	// 注册组件管理路由
-	RegisterComponentRouter(r)
+	// ---- 需认证路由 ----
+	authLogic := logic.NewAuthLogic()
+	api := r.Group("/api/v1")
+	api.Use(middleware.AuthRequired(authLogic.ValidateToken))
+	{
+		RegisterVideoRouter(api)
+		RegisterTaskRouter(api)
+		RegisterSettingRouter(api)
+		RegisterComponentRouter(api)
+	}
 
 	// 兜底 404
 	r.NoRoute(func(c *gin.Context) {

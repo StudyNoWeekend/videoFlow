@@ -2,7 +2,7 @@ import request, { type ApiResponse } from './request'
 import type { Video } from './video'
 
 // 任务类型
-export type TaskType = 'subtitle' | 'subtitle_burn' | 'deblur' | 'translate'
+export type TaskType = 'subtitle' | 'subtitle_burn' | 'deblur' | 'upscale'
 
 // 任务状态
 export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelling' | 'cancelled'
@@ -38,6 +38,16 @@ export interface TaskCreateReq {
   task_type: TaskType
   /** 可选：实际处理源文件路径，为空时默认使用关联视频 */
   source_path?: string
+  /** 可选：放大任务的输出宽度（目标分辨率） */
+  target_width?: number
+  /** 可选：放大任务的输出高度（目标分辨率） */
+  target_height?: number
+  /** 可选：清晰度修复处理器类型（仅 upscale 任务） */
+  upscale_processor?: string
+  /** 可选：清晰度修复模型/着色器名称（仅 upscale 任务） */
+  upscale_model?: string
+  /** 可选：降噪等级（仅 upscale 任务，-1=无/保守，0-3 递增） */
+  upscale_noise_level?: number
 }
 
 /**
@@ -45,14 +55,34 @@ export interface TaskCreateReq {
  * @param videoId 视频 ID
  * @param taskType 任务类型
  * @param sourcePath 可选：实际处理源文件路径，为空时默认使用关联视频
+ * @param targetWidth 可选：放大目标宽度
+ * @param targetHeight 可选：放大目标高度
+ * @param upscaleProcessor 可选：清晰度修复处理器（仅 upscale）
+ * @param upscaleModel 可选：清晰度修复模型/着色器（仅 upscale）
+ * @param upscaleNoiseLevel 可选：降噪等级（仅 upscale，-1=无/保守，0-3 递增）
  */
-export function createTask(videoId: string, taskType: TaskType, sourcePath?: string): Promise<Task> {
+export function createTask(
+  videoId: string,
+  taskType: TaskType,
+  sourcePath?: string,
+  targetWidth?: number,
+  targetHeight?: number,
+  upscaleProcessor?: string,
+  upscaleModel?: string,
+  upscaleNoiseLevel?: number,
+): Promise<Task> {
+  const body: Record<string, any> = {
+    video_id: videoId,
+    task_type: taskType,
+  }
+  if (sourcePath) body.source_path = sourcePath
+  if (targetWidth !== undefined) body.target_width = targetWidth
+  if (targetHeight !== undefined) body.target_height = targetHeight
+  if (upscaleProcessor !== undefined) body.upscale_processor = upscaleProcessor
+  if (upscaleModel !== undefined) body.upscale_model = upscaleModel
+  if (upscaleNoiseLevel !== undefined) body.upscale_noise_level = upscaleNoiseLevel
   return request
-    .post<ApiResponse<Task>>('/api/v1/tasks', {
-      video_id: videoId,
-      task_type: taskType,
-      ...(sourcePath ? { source_path: sourcePath } : {}),
-    })
+    .post<ApiResponse<Task>>('/api/v1/tasks', body)
     .then((res) => res.data.data)
 }
 

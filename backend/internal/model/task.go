@@ -22,27 +22,32 @@ const (
 	TaskStatusCancelled = "cancelled"
 )
 
-	// 任务类型枚举
-	const (
-		TaskTypeSubtitle     = "subtitle"
-		TaskTypeSubtitleBurn = "subtitle_burn"
-		TaskTypeDeblur       = "deblur"
-		TaskTypeRepair       = "repair"
-		TaskTypeTranslate    = "translate"
-	)
+// 任务类型枚举
+const (
+	TaskTypeSubtitle     = "subtitle"
+	TaskTypeSubtitleBurn = "subtitle_burn"
+	TaskTypeDeblur       = "deblur"
+	TaskTypeRepair       = "repair"
+	TaskTypeUpscale      = "upscale"
+)
 
-// Task 字幕/修复任务数据模型
+// Task 字幕/去马赛克任务数据模型
 type Task struct {
 	BaseModel
-	VideoID     string `gorm:"type:char(36);not null;index:idx_task_video_id;comment:关联视频ID" json:"video_id"`
-		TaskType    string `gorm:"type:varchar(32);not null;default:'subtitle';index:idx_task_task_type;comment:任务类型 subtitle/subtitle_burn/deblur/translate" json:"task_type"`
-	Status      string `gorm:"type:varchar(32);not null;default:'pending';index:idx_task_status;comment:任务状态 pending/running/completed/failed" json:"status"`
-	SourcePath  string `gorm:"type:varchar(1024);not null;default:'';comment:实际处理源文件路径，为空时使用关联视频路径" json:"source_path"`
-	Progress    int    `gorm:"default:0;comment:进度 0-100" json:"progress"`
-	ProgressMsg string `gorm:"type:text;comment:当前进度描述，如剩余时间、处理速度" json:"progress_msg"`
-	ResultJSON  string `gorm:"type:text;comment:ASR 结果 JSON" json:"-"`
-	ErrorMsg    string `gorm:"type:text;comment:错误信息" json:"error_msg"`
-	RetryCount  int    `gorm:"default:0;comment:重试次数" json:"retry_count"`
+	VideoID           string `gorm:"type:char(36);not null;index:idx_task_video_id;comment:关联视频ID" json:"video_id"`
+	TaskType          string `gorm:"type:varchar(32);not null;default:'subtitle';index:idx_task_task_type;comment:任务类型 subtitle/subtitle_burn/deblur/upscale" json:"task_type"`
+	Status            string `gorm:"type:varchar(32);not null;default:'pending';index:idx_task_status;comment:任务状态 pending/running/completed/failed" json:"status"`
+	SourcePath        string `gorm:"type:varchar(1024);not null;default:'';comment:实际处理源文件路径，为空时使用关联视频路径" json:"source_path"`
+	TargetWidth       int    `gorm:"default:0;comment:清晰度修复目标宽度（像素）" json:"target_width"`
+	TargetHeight      int    `gorm:"default:0;comment:清晰度修复目标高度（像素）" json:"target_height"`
+	Progress          int    `gorm:"default:0;comment:进度 0-100" json:"progress"`
+	ProgressMsg       string `gorm:"type:text;comment:当前进度描述，如剩余时间、处理速度" json:"progress_msg"`
+	ResultJSON        string `gorm:"type:text;comment:ASR 结果 JSON" json:"-"`
+	ErrorMsg          string `gorm:"type:text;comment:错误信息" json:"error_msg"`
+	RetryCount        int    `gorm:"default:0;comment:重试次数" json:"retry_count"`
+	UpscaleProcessor  string `gorm:"type:varchar(32);default:'';comment:清晰度修复处理器类型" json:"upscale_processor"`
+	UpscaleModel      string `gorm:"type:varchar(128);default:'';comment:清晰度修复模型/着色器名" json:"upscale_model"`
+	UpscaleNoiseLevel int    `gorm:"default:-1;comment:降噪等级（-1=无/保守，0-3递增）" json:"upscale_noise_level"`
 }
 
 // TableName 指定表名

@@ -13,12 +13,15 @@ export interface Setting {
   asr_word_timestamps: boolean
   asr_output: 'txt' | 'vtt' | 'srt' | 'tsv' | 'json'
   repair_docker_image: string
-  // 视频修复计算设备，支持四种：cpu（CPU）、cuda:0（NVIDIA CUDA）、mps（Apple Silicon MPS）、xpu:0（Intel XPU）
+  // 去马赛克计算设备，支持四种：cpu（CPU）、cuda:0（NVIDIA CUDA）、mps（Apple Silicon MPS）、xpu:0（Intel XPU）
   repair_device: 'cpu' | 'cuda:0' | 'mps' | 'xpu:0'
   subtitle_concurrency: number
   subtitle_burn_concurrency: number
   repair_concurrency: number
-  translate_concurrency: number
+  scheduler_poll_interval: number
+  upscale_docker_image: string
+  upscale_device: 'cpu' | 'cuda:0' | 'mps' | 'xpu:0'
+  upscale_concurrency: number
 }
 
 /**

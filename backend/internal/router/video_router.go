@@ -6,15 +6,16 @@ import (
 	"video-captions/internal/controller"
 )
 
-// RegisterVideoRouter 注册视频管理路由
-func RegisterVideoRouter(r *gin.Engine) {
+// RegisterVideoRouter 注册视频管理路由（需在鉴权分组下调用）
+func RegisterVideoRouter(rg *gin.RouterGroup) {
 	videoCtl := controller.NewVideoController()
 
-	api := r.Group("/api/v1/videos")
+	api := rg.Group("/videos")
 	{
 		api.GET("", videoCtl.List)
 		api.POST("/scan", videoCtl.Scan)
 		api.PUT("/:id", videoCtl.Update)
 		api.DELETE("/:id", videoCtl.Delete)
+		api.GET("/:id/dir-files", videoCtl.DirFiles)
 	}
 }

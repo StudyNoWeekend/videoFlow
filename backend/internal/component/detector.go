@@ -28,12 +28,13 @@ func NewDetector() *Detector {
 
 // DetectAll 检测所有组件
 func (d *Detector) DetectAll(ctx context.Context) []ComponentInfo {
-	results := make([]ComponentInfo, 0, 4)
+	results := make([]ComponentInfo, 0, 5)
 
 	results = append(results, d.detectDocker(ctx))
 	results = append(results, d.detectFFmpeg(ctx))
 	results = append(results, d.detectWhisperASR(ctx))
 	results = append(results, d.detectLada(ctx))
+	results = append(results, d.detectVideo2X(ctx))
 
 	d.mu.Lock()
 	d.cached = results
@@ -61,6 +62,8 @@ func (d *Detector) GetComponentStatus(ctx context.Context, componentType Compone
 		return d.detectWhisperASR(ctx)
 	case ComponentLada:
 		return d.detectLada(ctx)
+	case ComponentVideo2X:
+		return d.detectVideo2X(ctx)
 	default:
 		return ComponentInfo{
 			Type:     componentType,
@@ -174,6 +177,34 @@ func (d *Detector) detectLada(ctx context.Context) ComponentInfo {
 		// 检查是否是因为 docker daemon 不可达而非镜像不存在
 		if _, checkErr := runCommand(ctx, "docker", "info"); checkErr != nil {
 			info.ErrorMsg = "Docker daemon 不可达，无法检测 Lada 镜像。" +
+				"请确认 docker run 时已挂载 /var/run/docker.sock"
+		}
+		return info
+	}
+
+	info.Status = StatusInstalled
+	return info
+}
+
+func (d *Detector) detectVideo2X(ctx context.Context) ComponentInfo {
+	info := ComponentInfo{
+		Type:        ComponentVideo2X,
+		Name:        "Video2X",
+		Description: "Video upscaling tool for increasing video resolution (720p/1080p/2K/4K)",
+		NeedsDocker: true,
+	}
+
+	// Get configured image tag from settings
+	image := model.SettingGet(ctx, model.SettingKeyUpscaleDockerImage)
+	if image == "" {
+		image = "ghcr.io/k4yt3x/video2x:latest"
+	}
+
+	_, err := runCommand(ctx, "docker", "image", "inspect", image)
+	if err != nil {
+		info.Status = StatusMissing
+		if _, checkErr := runCommand(ctx, "docker", "info"); checkErr != nil {
+			info.ErrorMsg = "Docker daemon 不可达，无法检测 Video2X 镜像。" +
 				"请确认 docker run 时已挂载 /var/run/docker.sock"
 		}
 		return info

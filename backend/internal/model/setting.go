@@ -14,22 +14,26 @@ type Setting struct {
 
 // 统一设置项的键名
 const (
-	SettingKeyVideoDir             = "video_dir"
-	SettingKeyScanInterval         = "scan_interval"
-	SettingKeyASRURL               = "asr_url"
-	SettingKeyASRLanguage          = "asr_language"
-	SettingKeyASRVadFilter         = "asr_vad_filter"
-	SettingKeyASRTask              = "asr_task"
-	SettingKeyASREncode            = "asr_encode"
-	SettingKeyASRInitialPrompt     = "asr_initial_prompt"
-	SettingKeyASRWordTimestamps    = "asr_word_timestamps"
-	SettingKeyASROutput            = "asr_output"
-	SettingKeyRepairDockerImage    = "repair_docker_image"
-	SettingKeyRepairDevice         = "repair_device"
-	SettingKeySubtitleConcurrency  = "subtitle_concurrency"
+	SettingKeyVideoDir                = "video_dir"
+	SettingKeyScanInterval            = "scan_interval"
+	SettingKeyASRURL                  = "asr_url"
+	SettingKeyASRLanguage             = "asr_language"
+	SettingKeyASRVadFilter            = "asr_vad_filter"
+	SettingKeyASRTask                 = "asr_task"
+	SettingKeyASREncode               = "asr_encode"
+	SettingKeyASRInitialPrompt        = "asr_initial_prompt"
+	SettingKeyASRWordTimestamps       = "asr_word_timestamps"
+	SettingKeyASROutput               = "asr_output"
+	SettingKeyRepairDockerImage       = "repair_docker_image"
+	SettingKeyRepairDevice            = "repair_device"
+	SettingKeySubtitleConcurrency     = "subtitle_concurrency"
 	SettingKeySubtitleBurnConcurrency = "subtitle_burn_concurrency"
-	SettingKeyRepairConcurrency    = "repair_concurrency"
-	SettingKeyTranslateConcurrency = "translate_concurrency"
+	SettingKeyRepairConcurrency       = "repair_concurrency"
+	SettingKeyTranslateConcurrency    = "translate_concurrency"
+	SettingKeySchedulerPollInterval   = "scheduler_poll_interval"
+	SettingKeyUpscaleDockerImage      = "upscale_docker_image"
+	SettingKeyUpscaleDevice           = "upscale_device"
+	SettingKeyUpscaleConcurrency      = "upscale_concurrency"
 )
 
 // 统一设置项默认值（字符串形式持久化）
@@ -45,13 +49,17 @@ const (
 	DefaultASRWordTimestamps = "false"
 	DefaultASROutput         = "json"
 	DefaultRepairDockerImage = "ladaapp/lada:latest"
-	// DefaultRepairDevice 视频修复默认计算设备
+	// DefaultRepairDevice 去马赛克默认计算设备
 	// 支持四种设备：cpu（CPU）、cuda:0（NVIDIA CUDA）、mps（Apple Silicon MPS）、xpu:0（Intel XPU）
-	DefaultRepairDevice         = "cpu"
-		DefaultSubtitleConcurrency  = "2"
-		DefaultSubtitleBurnConcurrency = "1"
-		DefaultRepairConcurrency    = "1"
-	DefaultTranslateConcurrency = "1"
+	DefaultRepairDevice            = "cpu"
+	DefaultSubtitleConcurrency     = "2"
+	DefaultSubtitleBurnConcurrency = "1"
+	DefaultRepairConcurrency       = "1"
+	DefaultTranslateConcurrency    = "1"
+	DefaultSchedulerPollInterval   = "2"
+	DefaultUpscaleDockerImage      = "ghcr.io/k4yt3x/video2x:latest"
+	DefaultUpscaleDevice           = "cpu"
+	DefaultUpscaleConcurrency      = "1"
 )
 
 // TableName 指定表名

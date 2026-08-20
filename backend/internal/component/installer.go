@@ -13,6 +13,7 @@ import (
 type InstallParams struct {
 	ComponentType ComponentType `json:"component_type"`
 	Action        string        `json:"action"` // install, reinstall, uninstall
+	Image         string        `json:"image,omitempty"`
 }
 
 // ProgressEvent 进度事件

@@ -6,11 +6,11 @@ import (
 	"video-captions/internal/controller"
 )
 
-// RegisterTaskRouter 注册任务管理路由
-func RegisterTaskRouter(r *gin.Engine) {
+// RegisterTaskRouter 注册任务管理路由（需在鉴权分组下调用）
+func RegisterTaskRouter(rg *gin.RouterGroup) {
 	taskCtl := controller.NewTaskController()
 
-	api := r.Group("/api/v1/tasks")
+	api := rg.Group("/tasks")
 	{
 		api.GET("", taskCtl.List)
 		api.POST("", taskCtl.Create)

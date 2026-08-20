@@ -98,7 +98,10 @@ func (sm *SessionManager) runInstallation(ctx context.Context, session *InstallS
 
 	// 包装 events channel: 记录所有发送的事件到 History
 	events := make(chan ProgressEvent, 100)
+	var wg sync.WaitGroup
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		for e := range events {
 			session.AppendHistory(e)
 			session.Events <- e
@@ -113,12 +116,19 @@ func (sm *SessionManager) runInstallation(ctx context.Context, session *InstallS
 		switch session.Params.ComponentType {
 		case ComponentLada:
 			err = installLada(ctx, session.ID, session.Params, events)
+		case ComponentVideo2X:
+			err = installVideo2X(ctx, session.ID, session.Params, events)
 		case ComponentFFmpeg:
 			err = installFFmpeg(ctx, session.ID, session.Params, events)
 		default:
 			err = fmt.Errorf("unsupported component type: %s", session.Params.ComponentType)
 		}
 	}
+
+	// 关闭 events channel 通知转发协程退出
+	close(events)
+	// 等待转发协程处理完所有已发送的事件后再关闭 session.Events
+	wg.Wait()
 
 	if err != nil {
 		session.Status = "failed"

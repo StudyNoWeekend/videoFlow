@@ -13,12 +13,14 @@ type SettingReq struct {
 	ASRWordTimestamps bool   `json:"asr_word_timestamps"`
 	ASROutput         string `json:"asr_output" binding:"omitempty,oneof=txt vtt srt tsv json"`
 	RepairDockerImage string `json:"repair_docker_image" binding:"required"`
-	// RepairDevice 视频修复计算设备，支持 cpu / cuda:0 / mps / xpu:0 四种
+	// RepairDevice 去马赛克计算设备，支持 cpu / cuda:0 / mps / xpu:0 四种
 	RepairDevice        string `json:"repair_device" binding:"required,oneof=cpu cuda:0 mps xpu:0"`
 	SubtitleConcurrency int    `json:"subtitle_concurrency" binding:"required,gte=1,lte=50"`
 	// SubtitleBurnConcurrency 字幕烧录（写入视频）并发数
-	SubtitleBurnConcurrency int `json:"subtitle_burn_concurrency" binding:"required,gte=1,lte=50"`
-	RepairConcurrency       int `json:"repair_concurrency" binding:"required,gte=1,lte=50"`
-	// TranslateConcurrency 翻译并发数
-	TranslateConcurrency int `json:"translate_concurrency" binding:"required,gte=1,lte=50"`
+	SubtitleBurnConcurrency int    `json:"subtitle_burn_concurrency" binding:"required,gte=1,lte=50"`
+	RepairConcurrency       int    `json:"repair_concurrency" binding:"required,gte=1,lte=50"`
+	SchedulerPollInterval   int    `json:"scheduler_poll_interval" binding:"gte=1,lte=3600"`
+	UpscaleDockerImage      string `json:"upscale_docker_image"`
+	UpscaleDevice           string `json:"upscale_device" binding:"omitempty,oneof=cpu cuda:0 mps xpu:0"`
+	UpscaleConcurrency      int    `json:"upscale_concurrency" binding:"omitempty,gte=1,lte=50"`
 }

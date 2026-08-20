@@ -1,11 +1,26 @@
 <script setup lang="ts">
-import { RouterView, RouterLink, useRoute } from 'vue-router'
+import { RouterView, RouterLink, useRoute, useRouter } from 'vue-router'
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { elementPlusLocales } from '@/main'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { elementPlusLocales } from '@/i18n'
+import { useAuthStore } from '@/stores/auth'
+import { changePassword } from '@/api/auth'
+import { getVersion } from '@/api/version'
+import { validatePassword } from '@/utils/validate'
 
 const route = useRoute()
+const router = useRouter()
 const { t, locale } = useI18n()
+const auth = useAuthStore()
+
+// 应用版本号，从后端获取
+const appVersion = ref('')
+
+// 判断是否为公开认证页面（不显示工作台布局）
+const isPublicPage = computed(() => {
+  return route.meta?.public === true
+})
 
 const menuItems = computed(() => [
   { name: 'videos', label: t('nav.videos'), icon: 'VideoCamera', code: t('nav.code.videos') },
@@ -41,6 +56,25 @@ const themeLabel = computed(() => (isDark.value ? t('theme.dark') : t('theme.lig
 // Element Plus locale (reactive)
 const epLocale = computed(() => elementPlusLocales[locale.value] || elementPlusLocales.zh)
 
+// 当前语言显示标签
+const langLabels: Record<string, string> = {
+  zh: '简体中文',
+  'zh-TW': '繁體中文',
+  en: 'English',
+  ja: '日本語',
+}
+const currentLangLabel = computed(() => langLabels[locale.value] || '简体中文')
+
+// ---- 用户菜单 ----
+const userDropdownVisible = ref(false)
+const changePwdDialogVisible = ref(false)
+const changePwdLoading = ref(false)
+const changePwdForm = ref({
+  old_password: '',
+  new_password: '',
+  confirm_password: '',
+})
+
 function applyTheme(): void {
   document.documentElement.setAttribute('data-theme', theme.value)
   try {
@@ -56,7 +90,14 @@ function toggleTheme(): void {
 
 watch(theme, applyTheme)
 
-onMounted(() => {
+onMounted(async () => {
+  // 获取版本号
+  try {
+    appVersion.value = await getVersion()
+  } catch {
+    // 忽略错误，使用空值
+  }
+
   clockTimer = window.setInterval(() => {
     now.value = new Date()
   }, 1000)
@@ -75,89 +116,208 @@ onUnmounted(() => {
     clearInterval(clockTimer)
   }
 })
+
+// 退出登录
+function handleLogout(): void {
+  auth.logout()
+  ElMessage.success(t('auth.success.logout'))
+  router.push('/login')
+}
+
+// 打开修改密码弹窗
+function openChangePwdDialog(): void {
+  changePwdForm.value = { old_password: '', new_password: '', confirm_password: '' }
+  changePwdDialogVisible.value = true
+}
+
+// 提交修改密码
+async function handleChangePwd(): Promise<void> {
+  const form = changePwdForm.value
+  if (!form.old_password || !form.new_password || !form.confirm_password) {
+    ElMessage.warning(t('auth.error.fill_fields'))
+    return
+  }
+  if (form.new_password !== form.confirm_password) {
+    ElMessage.warning(t('auth.error.password_mismatch'))
+    return
+  }
+  // 校验新密码格式（与后端 auth_validate.go 规则一致）
+  const pwdErr = validatePassword(form.new_password)
+  if (pwdErr) {
+    ElMessage.warning(t(pwdErr))
+    return
+  }
+  if (form.old_password === form.new_password) {
+    ElMessage.warning(t('auth.error.same_password'))
+    return
+  }
+  changePwdLoading.value = true
+  try {
+    await changePassword(form)
+    changePwdDialogVisible.value = false
+    ElMessage.success(t('auth.success.change_password'))
+  } catch {
+    // 错误已在拦截器中处理
+  } finally {
+    changePwdLoading.value = false
+  }
+}
 </script>
 
 <template>
   <el-config-provider :locale="epLocale">
-    <div class="workbench">
-      <!-- 顶部状态栏 -->
-      <header class="status-bar">
-        <div class="status-bar__brand">
-          <div class="brand-logo">
-            <span class="brand-logo__mark">VF</span>
-            <span class="brand-logo__text">VideoFlow</span>
-          </div>
-          <span class="status-bar__version">v1.0.0</span>
-        </div>
+    <!-- 公开认证页面（登录、初始化、忘记密码） -->
+    <template v-if="isPublicPage">
+      <RouterView />
+    </template>
 
-        <div class="status-bar__indicators">
-          <div class="indicator">
-            <span class="vf-led vf-led--green vf-led--pulse"></span>
-            <span class="indicator__label">{{ $t('app.online') }}</span>
+    <!-- 主工作台 -->
+    <template v-else>
+      <div class="workbench">
+        <!-- 顶部状态栏 -->
+        <header class="status-bar">
+          <div class="status-bar__brand">
+            <div class="brand-logo">
+              <span class="brand-logo__mark">VF</span>
+              <span class="brand-logo__text">VideoFlow</span>
+            </div>
+            <span class="status-bar__version">{{ appVersion }}</span>
           </div>
-          <div class="indicator">
-            <span class="vf-led vf-led--amber"></span>
-            <span class="indicator__label">{{ $t('app.ready') }}</span>
-          </div>
-        </div>
 
-        <div class="status-bar__actions">
-          <button class="theme-toggle" :aria-label="themeLabel + ' ' + $t('theme.mode')" @click="toggleTheme">
-            <el-icon size="16">
-              <component :is="themeIcon" />
-            </el-icon>
-            <span class="theme-toggle__label">{{ themeLabel }}</span>
-          </button>
-
-          <div class="status-bar__clock">
-            <span class="clock__date">{{ dateString }}</span>
-            <span class="clock__time">{{ timeString }}</span>
-          </div>
-        </div>
-      </header>
-
-      <div class="workbench__body">
-        <!-- 侧边导航 -->
-        <aside class="side-rail">
-          <nav class="rail-menu">
-            <RouterLink
-              v-for="item in menuItems"
-              :key="item.name"
-              :to="{ name: item.name }"
-              class="rail-item"
-              :class="{ active: route.name === item.name }"
-            >
-              <div class="rail-item__code">{{ item.code }}</div>
-              <el-icon size="20">
-                <component :is="item.icon" />
+          <div class="status-bar__actions">
+            <button class="theme-toggle" :aria-label="themeLabel + ' ' + $t('theme.mode')" @click="toggleTheme">
+              <el-icon size="16">
+                <component :is="themeIcon" />
               </el-icon>
-              <span class="rail-item__label">{{ item.label }}</span>
-              <span v-if="route.name === item.name" class="rail-item__active-bar"></span>
-            </RouterLink>
-          </nav>
+              <span class="theme-toggle__label">{{ themeLabel }}</span>
+            </button>
 
-          <div class="rail-footer">
-            <div class="rail-footer__line">
-              <span class="vf-data-label">{{ $t('common.node') }}</span>
-              <span class="vf-data-value">{{ $t('common.local_node') }}</span>
-            </div>
-            <div class="rail-footer__line">
-              <span class="vf-data-label">{{ $t('common.uptime') }}</span>
-              <span class="vf-data-value">--:--</span>
+            <!-- 语言切换 -->
+            <el-dropdown trigger="click" @command="(lang: string) => { locale.value = lang as 'zh' | 'zh-TW' | 'en' | 'ja'; localStorage.setItem('videoflow-lang', lang); }">
+              <button class="lang-toggle">
+                <el-icon size="16"><Global /></el-icon>
+                <span class="lang-toggle__label">{{ currentLangLabel }}</span>
+                <el-icon size="10"><ArrowDown /></el-icon>
+              </button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item :class="{ active: locale.value === 'zh' }" command="zh">简体中文</el-dropdown-item>
+                  <el-dropdown-item :class="{ active: locale.value === 'zh-TW' }" command="zh-TW">繁體中文</el-dropdown-item>
+                  <el-dropdown-item :class="{ active: locale.value === 'en' }" command="en">English</el-dropdown-item>
+                  <el-dropdown-item :class="{ active: locale.value === 'ja' }" command="ja">日本語</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+
+            <!-- 用户菜单 -->
+            <el-dropdown trigger="click" @command="(cmd: string) => { if (cmd === 'change-pwd') openChangePwdDialog(); if (cmd === 'logout') handleLogout(); }">
+              <button class="user-menu">
+                <el-icon size="16"><User /></el-icon>
+                <span class="user-menu__name">{{ auth.user?.username || 'User' }}</span>
+                <el-icon size="12"><ArrowDown /></el-icon>
+              </button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="change-pwd">
+                    <el-icon size="14"><Lock /></el-icon>
+                    {{ $t('auth.change_password.title') }}
+                  </el-dropdown-item>
+                  <el-dropdown-item command="logout" divided>
+                    <el-icon size="14"><SwitchButton /></el-icon>
+                    {{ $t('auth.btn.logout') }}
+                  </el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+
+            <div class="status-bar__clock">
+              <span class="clock__date">{{ dateString }}</span>
+              <span class="clock__time">{{ timeString }}</span>
             </div>
           </div>
-        </aside>
+        </header>
 
-        <!-- 主内容区 -->
-        <main class="main-stage tech-grid scanlines noise">
-          <RouterView />
-        </main>
+        <div class="workbench__body">
+          <!-- 侧边导航 -->
+          <aside class="side-rail">
+            <nav class="rail-menu">
+              <RouterLink
+                v-for="item in menuItems"
+                :key="item.name"
+                :to="{ name: item.name }"
+                class="rail-item"
+                :class="{ active: route.name === item.name }"
+              >
+                <div class="rail-item__code">{{ item.code }}</div>
+                <el-icon size="20">
+                  <component :is="item.icon" />
+                </el-icon>
+                <span class="rail-item__label">{{ item.label }}</span>
+                <span v-if="route.name === item.name" class="rail-item__active-bar"></span>
+              </RouterLink>
+            </nav>
+
+          </aside>
+
+          <!-- 主内容区 -->
+          <main class="main-stage tech-grid scanlines noise">
+            <RouterView />
+          </main>
+        </div>
+
+        <!-- 修改密码对话框 -->
+        <el-dialog
+          v-model="changePwdDialogVisible"
+          :title="t('auth.change_password.title')"
+          width="420px"
+          :close-on-click-modal="false"
+        >
+          <el-form
+            ref="changePwdFormRef"
+            :model="changePwdForm"
+            label-position="top"
+            @submit.prevent="handleChangePwd"
+          >
+            <el-form-item :label="t('auth.placeholder.old_password')">
+              <el-input
+                v-model="changePwdForm.old_password"
+                type="password"
+                :placeholder="t('auth.placeholder.old_password')"
+                show-password
+              />
+            </el-form-item>
+            <el-form-item :label="t('auth.placeholder.new_password')">
+              <el-input
+                v-model="changePwdForm.new_password"
+                type="password"
+                :placeholder="t('auth.placeholder.new_password')"
+                show-password
+              />
+            </el-form-item>
+            <el-form-item :label="t('auth.placeholder.confirm_password')">
+              <el-input
+                v-model="changePwdForm.confirm_password"
+                type="password"
+                :placeholder="t('auth.placeholder.confirm_password')"
+                show-password
+              />
+            </el-form-item>
+          </el-form>
+          <template #footer>
+            <el-button @click="changePwdDialogVisible = false">{{ t('common.cancel') }}</el-button>
+            <el-button type="primary" :loading="changePwdLoading" @click="handleChangePwd">
+              {{ t('common.confirm') }}
+            </el-button>
+          </template>
+        </el-dialog>
       </div>
-    </div>
+    </template>
   </el-config-provider>
 </template>
 
 <style scoped>
+/* (所有原有样式保持不变，新加用户菜单样式) */
+
 .workbench {
   display: flex;
   flex-direction: column;
@@ -236,25 +396,6 @@ onUnmounted(() => {
   border-radius: var(--vf-radius-sm);
 }
 
-.status-bar__indicators {
-  display: flex;
-  align-items: center;
-  gap: 24px;
-}
-
-.indicator {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.indicator__label {
-  font-family: var(--vf-font-mono);
-  font-size: 11px;
-  color: var(--vf-text-secondary);
-  letter-spacing: 0.06em;
-}
-
 .status-bar__actions {
   display: flex;
   align-items: center;
@@ -286,6 +427,64 @@ onUnmounted(() => {
 .theme-toggle__label {
   min-width: 24px;
   text-align: center;
+}
+
+/* 语言切换按钮 */
+.lang-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  background: var(--vf-bg-panel);
+  border: 1px solid var(--vf-border-light);
+  border-radius: var(--vf-radius);
+  color: var(--vf-text-secondary);
+  font-family: var(--vf-font-ui);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.lang-toggle:hover {
+  border-color: var(--vf-accent);
+  color: var(--vf-accent);
+}
+
+.lang-toggle__label {
+  min-width: 48px;
+  text-align: center;
+}
+
+/* 用户菜单 */
+.user-menu {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--vf-bg-panel);
+  border: 1px solid var(--vf-border-light);
+  border-radius: var(--vf-radius);
+  color: var(--vf-text-secondary);
+  font-family: var(--vf-font-ui);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.user-menu:hover {
+  border-color: var(--vf-accent);
+  color: var(--vf-accent);
+}
+
+.user-menu__name {
+  max-width: 80px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .status-bar__clock {

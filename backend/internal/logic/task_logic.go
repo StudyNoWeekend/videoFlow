@@ -41,13 +41,6 @@ func (l *TaskLogic) CreateTask(ctx context.Context, createReq *req.TaskCreateReq
 		return nil, enum.ErrNotFound.WithMsg("视频不存在")
 	}
 
-	// 如果是翻译任务，需要校验字幕任务状态
-	if createReq.TaskType == model.TaskTypeTranslate {
-		if err := l.validateTranslateTask(ctx, createReq.VideoID); err != nil {
-			return nil, err
-		}
-	}
-
 	// 校验可选的实际处理源文件路径
 	sourcePath, err := l.validateSourcePath(video, createReq.SourcePath)
 	if err != nil {
@@ -55,10 +48,15 @@ func (l *TaskLogic) CreateTask(ctx context.Context, createReq *req.TaskCreateReq
 	}
 
 	task := &model.Task{
-		VideoID:    video.ID,
-		TaskType:   createReq.TaskType,
-		Status:     model.TaskStatusPending,
-		SourcePath: sourcePath,
+		VideoID:           video.ID,
+		TaskType:          createReq.TaskType,
+		Status:            model.TaskStatusPending,
+		SourcePath:        sourcePath,
+		TargetWidth:       createReq.TargetWidth,
+		TargetHeight:      createReq.TargetHeight,
+		UpscaleProcessor:  createReq.UpscaleProcessor,
+		UpscaleModel:      createReq.UpscaleModel,
+		UpscaleNoiseLevel: createReq.UpscaleNoiseLevel,
 	}
 	if err := model.TaskCreate(ctx, task); err != nil {
 		return nil, enum.ErrDatabase.WithMsg(fmt.Sprintf("创建任务失败: %v", err))
@@ -88,21 +86,6 @@ func (l *TaskLogic) validateSourcePath(video *model.Video, sourcePath string) (s
 		return "", enum.ErrInvalidParam.WithMsg("处理源文件必须是原视频的衍生视频")
 	}
 	return sourcePath, nil
-}
-
-// validateTranslateTask 校验翻译任务的前置条件：视频必须已有完成的字幕生成任务
-func (l *TaskLogic) validateTranslateTask(ctx context.Context, videoID string) error {
-	subtitleTask, err := model.TaskGetLatestByVideoIDAndType(ctx, videoID, model.TaskTypeSubtitle)
-	if err != nil {
-		return enum.ErrDatabase.WithMsg(fmt.Sprintf("查询字幕任务失败: %v", err))
-	}
-	if subtitleTask == nil {
-		return enum.ErrSubtitleNotCompleted
-	}
-	if subtitleTask.Status != model.TaskStatusCompleted {
-		return enum.ErrSubtitleNotCompleted
-	}
-	return nil
 }
 
 // RetryTask 重试失败任务，将其状态重置为 pending
@@ -251,19 +234,24 @@ func taskModelToResWithVideo(task *model.Task, video *model.Video) *res.TaskRes 
 	}
 
 	return &res.TaskRes{
-		ID:          task.ID,
-		VideoID:     task.VideoID,
-		TaskType:    task.TaskType,
-		Status:      task.Status,
-		SourcePath:  task.SourcePath,
-		Progress:    task.Progress,
-		ProgressMsg: task.ProgressMsg,
-		Result:      result,
-		ErrorMsg:    task.ErrorMsg,
-		RetryCount:  task.RetryCount,
-		CreatedAt:   task.CreatedAt,
-		UpdatedAt:   task.UpdatedAt,
-		Video:       videoModelToRes(video),
+		ID:                task.ID,
+		VideoID:           task.VideoID,
+		TaskType:          task.TaskType,
+		Status:            task.Status,
+		SourcePath:        task.SourcePath,
+		TargetWidth:       task.TargetWidth,
+		TargetHeight:      task.TargetHeight,
+		UpscaleProcessor:  task.UpscaleProcessor,
+		UpscaleModel:      task.UpscaleModel,
+		UpscaleNoiseLevel: task.UpscaleNoiseLevel,
+		Progress:          task.Progress,
+		ProgressMsg:       task.ProgressMsg,
+		Result:            result,
+		ErrorMsg:          task.ErrorMsg,
+		RetryCount:        task.RetryCount,
+		CreatedAt:         task.CreatedAt,
+		UpdatedAt:         task.UpdatedAt,
+		Video:             videoModelToRes(video),
 	}
 }
 
@@ -291,18 +279,23 @@ func taskWithVideoToRes(item *model.TaskWithVideo) *res.TaskRes {
 	}
 
 	return &res.TaskRes{
-		ID:          item.ID,
-		VideoID:     item.VideoID,
-		TaskType:    item.TaskType,
-		Status:      item.Status,
-		SourcePath:  item.SourcePath,
-		Progress:    item.Progress,
-		ProgressMsg: item.ProgressMsg,
-		Result:      result,
-		ErrorMsg:    item.ErrorMsg,
-		RetryCount:  item.RetryCount,
-		CreatedAt:   item.CreatedAt,
-		UpdatedAt:   item.UpdatedAt,
-		Video:       videoRes,
+		ID:                item.ID,
+		VideoID:           item.VideoID,
+		TaskType:          item.TaskType,
+		Status:            item.Status,
+		SourcePath:        item.SourcePath,
+		TargetWidth:       item.TargetWidth,
+		TargetHeight:      item.TargetHeight,
+		UpscaleProcessor:  item.UpscaleProcessor,
+		UpscaleModel:      item.UpscaleModel,
+		UpscaleNoiseLevel: item.UpscaleNoiseLevel,
+		Progress:          item.Progress,
+		ProgressMsg:       item.ProgressMsg,
+		Result:            result,
+		ErrorMsg:          item.ErrorMsg,
+		RetryCount:        item.RetryCount,
+		CreatedAt:         item.CreatedAt,
+		UpdatedAt:         item.UpdatedAt,
+		Video:             videoRes,
 	}
 }

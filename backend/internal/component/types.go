@@ -8,6 +8,7 @@ const (
 	ComponentFFmpeg     ComponentType = "ffmpeg"
 	ComponentWhisperASR ComponentType = "whisper_asr"
 	ComponentLada       ComponentType = "lada"
+	ComponentVideo2X    ComponentType = "video2x"
 )
 
 // ComponentStatus 组件状态

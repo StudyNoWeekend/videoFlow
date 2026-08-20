@@ -2,9 +2,9 @@
 
 # VideoFlow
 
-### 给 Whisper + FFmpeg 装上 Web 可视化管理 —— 扫描视频目录，字幕自动生成，损坏视频一键修复。
+### 给 Whisper + FFmpeg 装上 Web 可视化管理 —— 扫描视频目录，字幕自动生成，损坏视频一键去马赛克。
 
-基于 Whisper ASR + FFmpeg + Docker 修复引擎，用 Vue 3 + Element Plus 打造的 Web 可视化管理界面。告别脚本拼装，扫描入库、创建任务、实时进度、在线配置，全部在浏览器里完成。后端 Go（Gin + GORM + SQLite），支持 Docker 一键部署。
+基于 Whisper ASR + FFmpeg + Docker 去马赛克引擎，用 Vue 3 + Element Plus 打造的 Web 可视化管理界面。告别脚本拼装，扫描入库、创建任务、实时进度、在线配置，全部在浏览器里完成。后端 Go（Gin + GORM + SQLite），支持 Docker 一键部署。
 
 [![Stars](https://img.shields.io/github/stars/StudyNoWeekend/videoFlow?style=flat-square&logo=github&color=yellow)](https://github.com/StudyNoWeekend/videoFlow/stargazers)
 [![Forks](https://img.shields.io/github/forks/StudyNoWeekend/videoFlow?style=flat-square&logo=github&color=blue)](https://github.com/StudyNoWeekend/videoFlow/network/members)
@@ -24,7 +24,7 @@
 
 ## 💡 项目亮点
 
-本项目最大的亮点是：**把 Whisper 语音识别、FFmpeg 音频处理、Docker 视频修复这三件本来要拼脚本才能串起来的事，整合成了一套开箱即用的 Web 可视化管理平台**。
+本项目最大的亮点是：**把 Whisper 语音识别、FFmpeg 音频处理、Docker 去马赛克、清晰度增强这四件本来要拼脚本才能串起来的事，整合成了一套开箱即用的 Web 可视化管理平台**。
 
 单独用 Whisper / FFmpeg 并不难，但要把「扫描目录 -> 提取音频 -> 调 ASR -> 生成字幕 -> 任务并发 -> 进度跟踪 -> 失败重试 -> 在线改配置」串成完整流水线，命令行和脚本很难做得顺手。VideoFlow 在不改动底层引擎的前提下，给它套上了一层 Web UI：
 
@@ -32,13 +32,14 @@
 | --- | --- | --- |
 | 交互方式 | 命令行参数 + shell 脚本 | 浏览器图形界面，鼠标点点点 |
 | 字幕生成 | 手动提取音频、调 ASR、拼字幕文件 | 一键创建任务，自动 提取音频 -> ASR -> 生成字幕 |
-| 视频修复 | 手动跑 Docker 命令、盯终端 | 一键修复任务，支持 CPU / CUDA / MPS / XPU |
+| 去马赛克 | 手动跑 Docker 命令、盯终端 | 一键去马赛克任务，支持 CPU / CUDA / MPS / XPU |
+| 清晰度增强 | 自己找工具、参数难调 | 一键升级分辨率，Real-ESRGAN / Real-CUGAN / libplacebo 可选 |
 | 任务管理 | 自己记，关掉终端就没了 | 任务列表 + 实时进度 + 失败重试 + 历史可查 |
 | 并发控制 | 自己写队列 / 信号量 | 调度器按配置并发数自动调度 |
 | 配置修改 | 改配置文件、重启服务 | 在线修改，保存即热生效，持久化到数据库 |
 | 部署形态 | 一堆依赖要装 | Docker 单镜像，挂载配置即跑 |
 
-底层复用 [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice) 的识别能力、[FFmpeg](https://ffmpeg.org/) 的音视频处理、[`ladaapp/lada`](https://github.com/ladaapp/lada) 的视频修复，在其之上封装出 HTTP API 与 Web 前端 —— **命令行的能力，图形界面的体验**。
+底层复用 [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice) 的识别能力、[FFmpeg](https://ffmpeg.org/) 的音视频处理、[`ladaapp/lada`](https://github.com/ladaapp/lada) 的去马赛克，在其之上封装出 HTTP API 与 Web 前端 —— **命令行的能力，图形界面的体验**。
 
 ## 🎯 谁会想用
 
@@ -46,7 +47,7 @@
 | --- | --- |
 | **视频创作者 / 自媒体** | 批量给视频生成字幕，省去手动听写，导出 SRT / VTT 直接用 |
 | **字幕组 / 翻译爱好者** | 用 Whisper 批量转录生成时间轴，再人工校对，效率翻倍 |
-| **有损坏视频的人** | 视频打不开？用 lada Docker 一键修复，支持多种计算设备 |
+| **有损坏视频的人** | 视频打不开？用 lada Docker 一键去马赛克，支持多种计算设备 |
 | **NAS / 家庭服务器玩家** | Docker 长期挂着，定时扫描目录自动入库，新视频自动生成字幕 |
 | **想本地跑 Whisper 的人** | 不想写脚本，Web 界面配置 ASR 参数（语言 / VAD / 提示词）即可 |
 | **嫌命令行麻烦的人** | 全程图形界面，配置、扫描、任务进度一目了然 |
@@ -56,9 +57,11 @@
 
 - **视频目录扫描** - 手动扫描或后台定时自动扫描，视频自动入库，卡片式分页展示
 - **字幕生成** - 基于 Whisper ASR，支持语言、VAD 过滤、任务类型、音频预编码、初始提示词、词级时间戳、多种输出格式（json / srt / vtt / txt / tsv）
-- **视频修复** - 基于 Docker 镜像 `ladaapp/lada`，支持 x86_64 CPU 以及 NVIDIA CUDA 显卡（Turing 系列或更高版本，包括 RTX 20xx 到 RTX 50xx 系列）
+- **去马赛克** - 基于 Docker 镜像 `ladaapp/lada`，支持 x86_64 CPU 以及 NVIDIA CUDA 显卡（Turing 系列或更高版本，包括 RTX 20xx 到 RTX 50xx 系列），CUDA 设备自动透传（`--gpus`）、GPU 故障原因自动提示
+- **清晰度增强** - 基于 Video2X（`ghcr.io/k4yt3x/video2x:latest`）将视频升级到更高分辨率，支持 Real-ESRGAN / Real-CUGAN / libplacebo 处理器，目标分辨率与降噪等级按任务指定
 - **任务管理** - 创建 / 查询 / 删除 / 失败重试，按类型过滤，实时进度条，前端 2 秒轮询刷新
-- **任务调度器** - 后台调度器按配置的并发数限制执行字幕 / 修复任务
+- **任务调度器** - 后台调度器按配置的并发数限制执行字幕 / 去马赛克 / 清晰度增强任务，轮询间隔可在线配置
+- **用户认证** - 首次启动引导初始化管理员账号，登录 / 修改密码 / 密码重置，业务 API 全部走 JWT 鉴权
 - **运行时配置** - 统一配置页，所有配置在线修改并持久化（SQLite），保存即热生效
 - **FFmpeg 智能调用** - 自动探测本地 ffmpeg，无需手动配置
 - **工程化** - `trace_id` 全链路追踪、统一响应结构、zap 结构化日志、优雅关闭（重启时运行中任务自动标记失败）
@@ -100,7 +103,7 @@ docker run -d --name videoflow \
   -v "$PWD/config.yaml:/app/config/config.yaml:ro" \
   # 数据持久化（必需）
   -v "$PWD/data:/app/data" \
-  # 宿主机 Docker 套接字（必需：组件安装/检测/视频修复都需要）
+  # 宿主机 Docker 套接字（必需：组件安装/检测/去马赛克都需要）
   -v /var/run/docker.sock:/var/run/docker.sock \
   # 视频目录（必需：将宿主机视频目录映射到容器内路径，
   # 然后在 VideoFlow 设置页中配置对应容器内路径）
@@ -174,12 +177,12 @@ APP_HTTP_PORT=9090 go run ./cmd/api   # 后端
 
 ## 🎬 使用流程
 
-1. 启动服务，浏览器访问前端地址
+1. 启动服务，浏览器访问前端地址；首次使用先初始化管理员账号并登录
 2. 在「设置」页配置本地视频目录与 ASR 服务地址，保存
 3. 在「视频列表」页点击扫描，视频自动入库
 4. 点视频卡片上的「生成字幕」，创建字幕任务
 5. 在「任务管理」页查看实时进度（2 秒自动刷新）
-6. （可选）点「视频修复」修复损坏视频
+6. （可选）点「去马赛克」修复损坏视频，或点「清晰度增强」将视频升级到更高分辨率
 7. 字幕任务完成后，查看生成的字幕文件
 
 ## 🌐 技术栈
@@ -193,7 +196,8 @@ APP_HTTP_PORT=9090 go run ./cmd/api   # 后端
 | 日志 | [Zap](https://github.com/uber-go/zap) | 结构化日志 |
 | ASR | [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice) | 语音识别引擎 |
 | 音视频 | [FFmpeg](https://ffmpeg.org/) / ffprobe | 音频提取、时长探测，智能本地调用 |
-| 视频修复 | [`ladaapp/lada`](https://github.com/ladaapp/lada) | Docker 修复引擎 |
+| 去马赛克 | [`ladaapp/lada`](https://github.com/ladaapp/lada) | Docker 去马赛克引擎 |
+| 清晰度增强 | [Video2X](https://github.com/k4yt3x/video2x) | Docker 清晰度增强引擎 |
 | 前端 | [Vue 3](https://vuejs.org/) + [Element Plus](https://element-plus.org/) + [Vite](https://vite.dev/) | 图形界面 |
 | 状态管理 | [Pinia](https://pinia.vuejs.org/) | 前端状态 |
 | HTTP 客户端 | [Axios](https://axios-http.com/) | 接口请求 |
@@ -267,11 +271,11 @@ viper 前缀 `APP_`，配置键 `.` -> `_`，故 `http.port` 对应环境变量 
 | --- | --- | --- |
 | `/app/config/config.yaml` | 配置文件（只读挂载） | ✅ 必需 |
 | `/app/data` | SQLite 数据库持久化（`data/app.db`） | ✅ 必需 |
-| `/var/run/docker.sock` | 宿主机 Docker 套接字，用于组件安装/检测/视频修复 | ✅ 必需 |
+| `/var/run/docker.sock` | 宿主机 Docker 套接字，用于组件安装/检测/去马赛克/清晰度增强 | ✅ 必需 |
 | `/<容器内视频目录>` | 将宿主机视频目录挂载到容器内（如 `/videos`），然后在配置中将 `video.dir` 设为该路径 | ✅ 必需 |
 | `/app/logs` | 日志输出 | 可选 |
 
-> **为什么必须挂载 `/var/run/docker.sock`？** VideoFlow 运行在容器内，但它需要操作宿主机上的 Docker daemon——安装/检测 Whisper ASR 容器、拉取 Lada 镜像、执行视频修复 `docker run` 等，全部通过挂载的 Docker 套接字调用宿主机 Docker 实现。如果不挂载，组件管理页面会显示 Docker 不可用，视频修复功能也无法使用。
+> **为什么必须挂载 `/var/run/docker.sock`？** VideoFlow 运行在容器内，但它需要操作宿主机上的 Docker daemon——安装/检测 Whisper ASR 容器、拉取 Lada / Video2X 镜像、执行去马赛克 / 清晰度增强 `docker run` 等，全部通过挂载的 Docker 套接字调用宿主机 Docker 实现。如果不挂载，组件管理页面会显示 Docker 不可用，去马赛克和清晰度增强功能也无法使用。
 
 > **视频目录挂载说明：** 宿主机视频目录通过 volume 挂载到容器内路径（如 `/videos`），然后在 VideoFlow 设置页中配置 `video.dir` 为该容器内路径。容器内的 Go 代码通过 `os.Stat` / `filepath.WalkDir` 访问已挂载的路径，无需额外配置。
 
@@ -292,6 +296,22 @@ viper 前缀 `APP_`，配置键 `.` -> `_`，故 `http.port` 对应环境变量 
 
 `code=0` 表示成功，非 0 表示业务错误。
 
+> **认证说明**：除健康检查、认证接口、`/api/v1/version` 与组件安装进度 SSE 接口外，其余业务接口均需在请求头携带登录返回的 Token（`Authorization: Bearer <token>`）。
+
+<details>
+<summary><b>认证接口</b></summary>
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/v1/auth/status` | 查询初始化 / 登录状态 |
+| `POST` | `/api/v1/auth/init` | 首次运行初始化管理员账号 |
+| `POST` | `/api/v1/auth/login/password` | 账号密码登录，返回 Token |
+| `POST` | `/api/v1/auth/reset-token` | 生成密码重置令牌 |
+| `POST` | `/api/v1/auth/reset-password` | 通过令牌重置密码 |
+| `POST` | `/api/v1/auth/change-password` | 修改密码（需登录） |
+
+</details>
+
 <details>
 <summary><b>健康检查</b></summary>
 
@@ -299,6 +319,7 @@ viper 前缀 `APP_`，配置键 `.` -> `_`，故 `http.port` 对应环境变量 
 | --- | --- | --- |
 | `GET` | `/health` | 健康检查 |
 | `GET` | `/ready` | 就绪检查 |
+| `GET` | `/api/v1/version` | 当前版本号 |
 
 </details>
 
@@ -319,12 +340,24 @@ viper 前缀 `APP_`，配置键 `.` -> `_`，故 `http.port` 对应环境变量 
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| `POST` | `/api/v1/tasks` | 创建任务（字幕 / 修复） |
+| `POST` | `/api/v1/tasks` | 创建任务（字幕 / 字幕烧录 / 去马赛克 / 清晰度增强） |
 | `GET` | `/api/v1/tasks` | 分页查询任务列表（可按类型过滤） |
 | `POST` | `/api/v1/tasks/:id/retry` | 重试失败任务 |
 | `DELETE` | `/api/v1/tasks/:id` | 删除任务 |
 
 任务状态：`pending`（待处理）-> `running`（进行中）-> `completed`（已完成）/ `failed`（失败）
+
+> **清晰度增强任务参数**：创建时需指定目标分辨率（`target_width` / `target_height`），处理器（`upscale_processor`：`realesrgan` / `realcugan` / `libplacebo`）、模型（`upscale_model`）与降噪等级（`upscale_noise_level`，-1 ~ 3）可按需设置。
+
+</details>
+
+<details>
+<summary><b>组件接口</b></summary>
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/v1/components` | 检测各组件状态（Docker / FFmpeg / Whisper ASR / lada / Video2X） |
+| `GET` | `/api/v1/components/install/progress/:session_id` | 组件安装进度（SSE 实时推送，公开接口） |
 
 </details>
 
@@ -344,7 +377,7 @@ viper 前缀 `APP_`，配置键 `.` -> `_`，故 `http.port` 对应环境变量 
 videoFlow/
 ├── backend/
 │   ├── cmd/api/              # 程序入口 main.go
-│   ├── bootstrap/            # 配置、DB、ASR、FFmpeg、修复 等初始化
+│   ├── bootstrap/            # 配置、DB、ASR、FFmpeg、去马赛克 等初始化
 │   ├── config/               # 配置文件（config.yaml.local 为模板）
 │   ├── internal/
 │   │   ├── controller/       # HTTP 控制器
@@ -354,7 +387,8 @@ videoFlow/
 │   │   ├── router/           # 路由注册
 │   │   ├── asr/              # ASR 客户端
 │   │   ├── ffmpeg/           # FFmpeg 本地执行器
-│   │   ├── repair/           # 视频修复执行器
+│   │   ├── repair/           # 去马赛克执行器
+│   │   ├── upscale/          # 清晰度增强执行器
 │   │   ├── subtitle/         # 字幕解析
 │   │   ├── scanner/          # 视频目录扫描器
 │   │   └── scheduler/        # 任务调度器
@@ -375,7 +409,8 @@ videoFlow/
 ## 🛡️ 注意事项
 
 - **FFmpeg 必需**：`ffmpeg.provider` 固定为 `local`，镜像已内置 ffmpeg；本地源码运行需自行安装
-- **视频修复需 Docker**：容器部署时需挂载宿主机 Docker socket；不用该功能可忽略，不影响服务启动
+- **去马赛克 / 清晰度增强需 Docker**：容器部署时需挂载宿主机 Docker socket；不用该功能可忽略，不影响服务启动
+- **首次使用需初始化**：浏览器首次访问会引导初始化管理员账号，登录后才能使用业务功能
 - **ASR 服务需自备**：请自行部署 [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice)，并配置 `asr.url`
 - **数据库持久化**：默认 `data/app.db`，Docker 部署时务必挂载 `/app/data` 目录，否则重启丢数据
 
@@ -389,9 +424,9 @@ videoFlow/
 </details>
 
 <details>
-<summary><b>视频修复功能不可用？</b></summary>
+<summary><b>去马赛克功能不可用？</b></summary>
 
-修复依赖 Docker。容器部署时需挂载宿主机 Docker socket：`-v /var/run/docker.sock:/var/run/docker.sock`；不用该功能可忽略，不影响服务启动。
+去马赛克依赖 Docker。容器部署时需挂载宿主机 Docker socket：`-v /var/run/docker.sock:/var/run/docker.sock`；不用该功能可忽略，不影响服务启动。
 
 </details>
 
@@ -411,16 +446,17 @@ videoFlow/
 
 ## 🗺️ Roadmap
 
-- ✅ 视频扫描 + 字幕生成 + 视频修复
+- ✅ 视频扫描 + 字幕生成 + 去马赛克
 - ✅ 任务管理 + 实时进度 + 失败重试
 - ✅ 运行时配置在线修改 + 持久化
 - ✅ Docker 部署 + 端口运行时指定
 - ✅ FFmpeg 智能本地调用
 - ✅ 多架构镜像（amd64 + arm64 原生支持）
+- ✅ 用户认证（登录 / 初始化 / 修改密码）
+- ✅ 视频清晰度增强（Video2X）
 - 🔲 字幕在线预览 / 编辑
 - 🔲 字幕文件导出下载
 - 🔲 API Key 鉴权，用于外网访问拦截
-- 🔲 视频清晰度修复（超分辨率增强）
 
 ## 💌 致谢
 
@@ -428,7 +464,8 @@ videoFlow/
 
 - **[Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice)** - by [@ahmetoner](https://github.com/ahmetoner)，基于 OpenAI Whisper 的 ASR HTTP 服务，VideoFlow 的语音识别能力全部基于此。
 - **[FFmpeg](https://ffmpeg.org/)** - 强大的音视频处理工具，负责音频提取与时长探测。
-- **[ladaapp/lada](https://github.com/ladaapp/lada)** - 视频修复 Docker 镜像。
+- **[ladaapp/lada](https://github.com/ladaapp/lada)** - 去马赛克 Docker 镜像。
+- **[Video2X](https://github.com/k4yt3x/video2x)** - 视频清晰度增强 Docker 镜像。
 - **[Gin](https://github.com/gin-gonic/gin)** / **[GORM](https://github.com/go-gorm/gorm)** / **[Viper](https://github.com/spf13/viper)** / **[Zap](https://github.com/uber-go/zap)** - 优秀的 Go 基础库。
 - **[Vue 3](https://vuejs.org/)** / **[Element Plus](https://element-plus.org/)** / **[Vite](https://vite.dev/)** - 前端基石。
 

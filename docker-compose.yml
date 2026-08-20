@@ -12,7 +12,7 @@ services:
       - ./config.yaml:/app/config/config.yaml:ro
       # 必需：数据持久化（SQLite 数据库）
       - ./data:/app/data
-      # 必需：宿主机 Docker 套接字（组件安装/检测/视频修复都需要）
+      # 必需：宿主机 Docker 套接字（组件安装/检测/去马赛克都需要）
       - /var/run/docker.sock:/var/run/docker.sock
       # 必需：视频目录，将宿主机视频目录挂载到容器内路径，
       #       然后在 VideoFlow 配置中将 video.dir 设为对应的容器内路径

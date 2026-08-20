@@ -23,23 +23,23 @@ import (
 	"video-captions/utils/logger"
 )
 
-// Config 视频修复 Docker 配置
+// Config 去马赛克 Docker 配置
 type Config struct {
 	DockerImage string
 	// Device 计算设备，支持四种：cpu（CPU）、cuda:0（NVIDIA CUDA）、mps（Apple Silicon MPS）、xpu:0（Intel XPU）
 	Device string
 }
 
-// ProgressCallback 修复进度回调，progress 为 0-100，message 为当前进度行原始文本
+// ProgressCallback 去马赛克进度回调，progress 为 0-100，message 为当前进度行原始文本
 type ProgressCallback func(progress int, message string)
 
-// Executor 视频修复执行器，在本地执行 Docker 修复命令
+// Executor 去马赛克执行器，在本地执行 Docker 去马赛克命令
 type Executor struct {
 	mu     sync.RWMutex
 	config Config
 }
 
-// NewExecutor 创建视频修复执行器实例
+// NewExecutor 创建去马赛克执行器实例
 func NewExecutor(cfg Config) *Executor {
 	return &Executor{
 		config: cfg,
@@ -54,7 +54,7 @@ func (e *Executor) Init(cfg Config) error {
 // Reload 运行时重新加载配置，并校验 docker 是否可用。
 func (e *Executor) Reload(cfg Config) error {
 	if cfg.DockerImage == "" {
-		return errors.New("修复 Docker 镜像不能为空")
+		return errors.New("去马赛克 Docker 镜像不能为空")
 	}
 
 	if _, err := exec.LookPath("docker"); err != nil {
@@ -89,7 +89,7 @@ type containerMountEntry struct {
 	Destination string `json:"Destination"`
 }
 
-// cachedMounts 缓存 docker inspect 的挂载结果，避免每次修复都执行一次。
+// cachedMounts 缓存 docker inspect 的挂载结果，避免每次去马赛克都执行一次。
 var (
 	cachedMounts     []containerMountEntry
 	cachedMountsOnce sync.Once
@@ -293,7 +293,7 @@ func stopAndRemoveContainer(containerName string) {
 	cmd := exec.CommandContext(ctx, "docker", "rm", "-f", containerName)
 	out, err := cmd.CombinedOutput()
 	if err == nil {
-		logger.Logger.Info("已清理被孤立的修复容器",
+		logger.Logger.Info("已清理被孤立的去马赛克容器",
 			zap.String("container", containerName),
 			zap.String("output", strings.TrimSpace(string(out))),
 		)
@@ -304,14 +304,14 @@ func stopAndRemoveContainer(containerName string) {
 	if strings.Contains(strings.ToLower(string(out)), "no such container") {
 		return
 	}
-	logger.Logger.Warn("清理被孤立的修复容器失败",
+	logger.Logger.Warn("清理被孤立的去马赛克容器失败",
 		zap.String("container", containerName),
 		zap.String("output", strings.TrimSpace(string(out))),
 		zap.Error(err),
 	)
 }
 
-// Execute 在本地执行视频修复命令，并通过 onProgress 实时回调进度。
+// Execute 在本地执行去马赛克命令，并通过 onProgress 实时回调进度。
 // 返回命令完整输出（stdout + stderr）以及可能的错误。
 func (e *Executor) Execute(ctx context.Context, videoPath string, onProgress ProgressCallback) (output string, err error) {
 	e.mu.RLock()
@@ -329,14 +329,7 @@ func (e *Executor) Execute(ctx context.Context, videoPath string, onProgress Pro
 	// Docker 容器名只允许 [a-zA-Z0-9][a-zA-Z0-9_.-]*，中文等字符需转义并追加哈希避免重名
 	containerName := sanitizeContainerName(baseName, videoPath) + "_lada"
 
-	args := []string{
-		"run", "--rm",
-		"--name", containerName,
-		"--mount", fmt.Sprintf("type=bind,src=%s,dst=/mnt", hostParentDir),
-		cfg.DockerImage,
-		"--input", "/mnt/" + baseName,
-		"--device", cfg.Device,
-	}
+	args := buildRunArgs(cfg, containerName, hostParentDir, baseName)
 
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	out, err := streamCommand(cmd, onProgress)
@@ -349,9 +342,46 @@ func (e *Executor) Execute(ctx context.Context, videoPath string, onProgress Pro
 	}
 
 	if err != nil {
-		return output, fmt.Errorf("修复命令执行失败: %w", err)
+		if strings.HasPrefix(cfg.Device, "cuda") {
+			return output, fmt.Errorf("去马赛克命令执行失败: %w%s", err, gpuFailureHint(output))
+		}
+		return output, fmt.Errorf("去马赛克命令执行失败: %w", err)
 	}
 	return output, nil
+}
+
+// gpuSpec 将宿主机 GPU 透传给容器（--gpus 的值）。
+// compute 供 CUDA 推理，video 供 nvenc 硬件编码（lada 官方推荐写法）。
+// 内层双引号必须保留：docker CLI 按逗号切分该参数，引号使 capabilities=compute,video
+// 作为整体被解析；exec 不经 shell，整个字符串作为一个 argv 直接传入。
+const gpuSpec = `all,"capabilities=compute,video"`
+
+// buildRunArgs 构建 docker run 参数。cfg.Device 为 lada 容器内部程序的 --device 参数，
+// 非 Docker 标志；CUDA 设备需额外通过 --gpus 透传宿主机 GPU，否则容器内 CUDA 不可用。
+func buildRunArgs(cfg Config, containerName, hostParentDir, baseName string) []string {
+	args := []string{"run", "--rm"}
+	if strings.HasPrefix(cfg.Device, "cuda") {
+		args = append(args, "--gpus", gpuSpec)
+	}
+	return append(args,
+		"--name", containerName,
+		"--mount", fmt.Sprintf("type=bind,src=%s,dst=/mnt", hostParentDir),
+		cfg.DockerImage,
+		"--input", "/mnt/"+baseName,
+		"--device", cfg.Device,
+	)
+}
+
+// gpuFailureHint 根据去马赛克命令的输出识别 GPU 失败原因，返回附加到错误信息的中文提示。
+func gpuFailureHint(output string) string {
+	lower := strings.ToLower(output)
+	switch {
+	case strings.Contains(lower, "could not select device driver"):
+		return "\n提示: 宿主机 Docker 无法使用 NVIDIA GPU，请确认已安装 NVIDIA 驱动和 NVIDIA Container Toolkit，或在设置中将去马赛克设备切回 cpu"
+	case strings.Contains(lower, "cuda is not available"):
+		return "\n提示: 容器内 CUDA 不可用，请更新 NVIDIA 驱动并确认 GPU 为 Turing 及以上架构（RTX 20xx 及之后），或在设置中将去马赛克设备切回 cpu"
+	}
+	return ""
 }
 
 var (
@@ -403,7 +433,18 @@ func streamCommand(cmd *exec.Cmd, onProgress ProgressCallback) ([]byte, error) {
 	}
 
 	var outputBuf strings.Builder
+	var outputMu sync.Mutex
 	var wg sync.WaitGroup
+
+	// writeOutput 将一行输出追加到共享缓冲区。
+	// stdout/stderr 由两个 goroutine 并发读取，strings.Builder 非并发安全，
+	// 不加锁会导致输出丢失/错乱（错误信息 output 为空即是该竞态的表现）。
+	writeOutput := func(line string) {
+		outputMu.Lock()
+		outputBuf.WriteString(line)
+		outputBuf.WriteByte('\n')
+		outputMu.Unlock()
+	}
 
 	streamReader := func(r io.Reader) {
 		defer wg.Done()
@@ -411,8 +452,7 @@ func streamCommand(cmd *exec.Cmd, onProgress ProgressCallback) ([]byte, error) {
 		scanner.Split(splitProgressLine)
 		for scanner.Scan() {
 			line := scanner.Text()
-			outputBuf.WriteString(line)
-			outputBuf.WriteByte('\n')
+			writeOutput(line)
 			if onProgress == nil {
 				continue
 			}

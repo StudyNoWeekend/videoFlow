@@ -147,7 +147,7 @@ function typeText(type: string): string {
     subtitle: t('tasks.type.subtitle'),
     subtitle_burn: t('tasks.type.subtitle_burn'),
     deblur: t('tasks.type.deblur'),
-    translate: t('tasks.type.translate'),
+    upscale: t('tasks.type.upscale'),
   }
   return map[type] || type
 }
@@ -232,6 +232,7 @@ onUnmounted(() => {
           <el-radio-button label="subtitle">{{ $t('tasks.filter.subtitle') }}</el-radio-button>
           <el-radio-button label="subtitle_burn">{{ $t('tasks.filter.subtitle_burn') }}</el-radio-button>
           <el-radio-button label="deblur">{{ $t('tasks.filter.deblur') }}</el-radio-button>
+          <el-radio-button label="upscale">{{ $t('tasks.filter.upscale') }}</el-radio-button>
         </el-radio-group>
 
         <div class="toolbar-right">
@@ -267,7 +268,7 @@ onUnmounted(() => {
           </el-table-column>
           <el-table-column :label="$t('tasks.column.type')" width="100">
             <template #default="{ row }">
-              <el-tag :type="row.task_type === 'deblur' ? 'warning' : row.task_type === 'subtitle_burn' ? 'success' : 'primary'">{{ typeText(row.task_type) }}</el-tag>
+              <el-tag :type="row.task_type === 'deblur' ? 'warning' : row.task_type === 'subtitle_burn' ? 'success' : row.task_type === 'upscale' ? 'success' : 'primary'">{{ typeText(row.task_type) }}</el-tag>
             </template>
           </el-table-column>
           <el-table-column :label="$t('tasks.column.status')" width="130">

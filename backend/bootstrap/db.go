@@ -3,6 +3,7 @@ package bootstrap
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"time"
@@ -34,8 +35,21 @@ func InitDB(cfg *AppConfigDatabase) (*gorm.DB, error) {
 		logLevel = logger.Info
 	}
 
+	// 自定义 GORM 日志器：
+	// - IgnoreRecordNotFoundError 为 true，避免空结果查询（如调度器轮询 pending 任务）刷屏
+	// - 非 debug 级别时仅记录慢 SQL 与真实错误，SQL 明细仅在 debug 级别打印
+	gormLogger := logger.New(
+		log.New(os.Stdout, "\r\n", log.LstdFlags),
+		logger.Config{
+			SlowThreshold:             200 * time.Millisecond,
+			LogLevel:                  logLevel,
+			IgnoreRecordNotFoundError: true,
+			Colorful:                  true,
+		},
+	)
+
 	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{
-		Logger: logger.Default.LogMode(logLevel),
+		Logger: gormLogger,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("打开 SQLite 数据库失败: %w", err)
@@ -67,6 +81,8 @@ func autoMigrate(ctx context.Context, db *gorm.DB) error {
 		model.Video{},
 		model.Task{},
 		model.Setting{},
+		model.User{},
+		model.ResetToken{},
 	); err != nil {
 		return err
 	}

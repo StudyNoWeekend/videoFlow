@@ -41,15 +41,8 @@ repair:
   # 计算设备，支持四种：cpu / cuda:0 / mps / xpu:0
   device: cpu
 
-translation:
-  ollama_url: http://localhost:11434/api/generate
-  model: qwen3.5:0.8b
-  prompt_template: |
-    你是一个专业的翻译家。请将下面每一行文本翻译成中文。
-    每行输入对应一行输出，不要合并或拆分行，不要输出序号或其他内容。
-    只输出翻译结果。
-
-    {content}
+scheduler:
+  poll_interval: 2
 
 concurrency:
   subtitle: 2

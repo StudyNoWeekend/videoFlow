@@ -1,23 +1,23 @@
 package ffmpeg
 
 import (
-		"bufio"
-		"bytes"
-		"context"
-		"errors"
-		"fmt"
-		"io"
-		"os"
-		"os/exec"
-		"path/filepath"
-		"regexp"
-		"strconv"
-		"strings"
-		"sync"
-		"time"
+	"bufio"
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
 
-		"video-captions/enum"
-	)
+	"video-captions/enum"
+)
 
 // 用于从 ffmpeg -i 输出中匹配时长的正则表达式
 var durationRegex = regexp.MustCompile(`Duration: (\d{2}):(\d{2}):(\d{2}\.\d+)`)
@@ -381,6 +381,95 @@ func getDurationByFFmpeg(ctx context.Context, videoPath string) (float64, error)
 	}
 
 	return 0, fmt.Errorf("%w: %v, output: %s", enum.ErrDurationParse, parseErr, outputStr)
+}
+
+// GetResolution 获取视频文件的分辨率（宽 x 高）。
+// 本地模式下先检查文件是否存在；优先使用 ffprobe，失败时回退到 ffmpeg -i 解析。
+func GetResolution(ctx context.Context, videoPath string) (width, height int, err error) {
+	if err := ensureFFmpeg(ctx); err != nil {
+		return 0, 0, err
+	}
+
+	if !isRemote() {
+		if _, err := os.Stat(videoPath); err != nil {
+			if os.IsNotExist(err) {
+				return 0, 0, fmt.Errorf("%w: %s", enum.ErrVideoNotFound, videoPath)
+			}
+			return 0, 0, fmt.Errorf("%w: %v", enum.ErrVideoNotFound, err)
+		}
+	}
+
+	// 优先使用 ffprobe 获取分辨率
+	w, h, err := getResolutionByFFprobe(ctx, videoPath)
+	if err == nil {
+		return w, h, nil
+	}
+
+	// ffprobe 失败时回退到 ffmpeg -i 解析 stderr
+	w, h, err = getResolutionByFFmpeg(ctx, videoPath)
+	if err == nil {
+		return w, h, nil
+	}
+
+	return 0, 0, err
+}
+
+// getResolutionByFFprobe 使用 ffprobe 获取视频分辨率
+func getResolutionByFFprobe(ctx context.Context, videoPath string) (int, int, error) {
+	args := []string{
+		"-v", "error",
+		"-select_streams", "v:0",
+		"-show_entries", "stream=width,height",
+		"-of", "csv=p=0",
+		videoPath,
+	}
+
+	output, err := run(ctx, "ffprobe", args...)
+	if err != nil {
+		return 0, 0, fmt.Errorf("ffprobe execute failed: %w, output: %s", err, string(output))
+	}
+
+	line := strings.TrimSpace(string(output))
+	parts := strings.Split(line, ",")
+	if len(parts) < 2 {
+		return 0, 0, fmt.Errorf("unexpected ffprobe output: %s", line)
+	}
+
+	width, errW := strconv.Atoi(strings.TrimSpace(parts[0]))
+	height, errH := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if errW != nil || errH != nil {
+		return 0, 0, fmt.Errorf("parse ffprobe resolution failed: width=%v height=%v", errW, errH)
+	}
+
+	return width, height, nil
+}
+
+// resolutionParseRegex 用于从 ffmpeg -i 输出中匹配视频流分辨率
+var resolutionParseRegex = regexp.MustCompile(`(\d{3,5})x(\d{3,5})`)
+
+// getResolutionByFFmpeg 使用 ffmpeg -i 解析 stderr 中的 Stream #0:0 分辨率
+func getResolutionByFFmpeg(ctx context.Context, videoPath string) (int, int, error) {
+	output, err := run(ctx, "ffmpeg", "-i", videoPath)
+	outputStr := string(output)
+
+	matches := resolutionParseRegex.FindStringSubmatch(outputStr)
+	if len(matches) >= 3 {
+		w, errW := strconv.Atoi(matches[1])
+		h, errH := strconv.Atoi(matches[2])
+		if errW == nil && errH == nil && w > 0 && h > 0 {
+			return w, h, nil
+		}
+	}
+
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return 0, 0, fmt.Errorf("resolution not found in ffmpeg output")
+		}
+		return 0, 0, fmt.Errorf("%w: %v", enum.ErrFFmpegExecute, err)
+	}
+
+	return 0, 0, fmt.Errorf("resolution not found in ffmpeg output")
 }
 
 // parseDuration 从 ffmpeg 输出文本中解析 Duration 字段并转换为秒

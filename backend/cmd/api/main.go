@@ -26,7 +26,7 @@ func main() {
 	}
 
 	// 初始化 zap 日志
-	if err := logger.InitLogger(cfg.Log.Level); err != nil {
+	if err := logger.InitLogger(cfg.Log.Level, cfg.Log.Path); err != nil {
 		log.Fatalf("初始化日志失败: %v", err)
 	}
 	defer logger.Sync()
@@ -37,14 +37,22 @@ func main() {
 		log.Fatalf("初始化数据库失败: %v", err)
 	}
 
+	// 兼容旧命令：reset-password 等 CLI 子命令已移除，密码重置改为通过网页触发
+	if len(os.Args) > 1 {
+		fmt.Println("错误: 不再支持命令行参数")
+		fmt.Println()
+		fmt.Println("密码重置功能已迁移到网页端：")
+		fmt.Println("  1. 打开登录页，点击“忘记密码”")
+		fmt.Println("  2. 输入用户名，点击“获取重置令牌”")
+		fmt.Println("  3. 到服务器日志（如 docker compose logs -f）中查看令牌并粘贴回页面")
+		os.Exit(1)
+	}
+
+	// ---- 以下为正常 HTTP 服务启动流程 ----
+
 	// 初始化 ASR Provider
 	if err := bootstrap.InitASR(); err != nil {
 		log.Fatalf("初始化 ASR Provider 失败: %v", err)
-	}
-
-	// 初始化翻译执行器
-	if err := bootstrap.InitTranslation(); err != nil {
-		log.Fatalf("初始化翻译执行器失败: %v", err)
 	}
 
 	// 初始化 ffmpeg 执行环境
@@ -57,14 +65,24 @@ func main() {
 		log.Fatalf("加载已保存的 ffmpeg 配置失败: %v", err)
 	}
 
-	// 初始化视频修复执行器
+	// 初始化去马赛克执行器
 	if err := bootstrap.InitRepair(context.Background()); err != nil {
-		log.Fatalf("初始化视频修复执行器失败: %v", err)
+		log.Fatalf("初始化去马赛克执行器失败: %v", err)
 	}
 
-	// 若数据库中已持久化视频修复配置，则覆盖配置文件默认值（出错不阻断启动）
+	// 若数据库中已持久化去马赛克配置，则覆盖配置文件默认值（出错不阻断启动）
 	if err := logic.NewSettingLogic().ApplyRepairFromSettings(context.Background()); err != nil {
-		log.Printf("加载已保存的视频修复配置失败（将使用默认配置）: %v", err)
+		log.Printf("加载已保存的去马赛克配置失败（将使用默认配置）: %v", err)
+	}
+
+	// 初始化清晰度去马赛克执行器
+	if err := bootstrap.InitUpscale(context.Background()); err != nil {
+		log.Fatalf("初始化清晰度去马赛克执行器失败: %v", err)
+	}
+
+	// 若数据库中已持久化清晰度去马赛克配置，则覆盖配置文件默认值（出错不阻断启动）
+	if err := logic.NewSettingLogic().ApplyUpscaleFromSettings(context.Background()); err != nil {
+		log.Printf("加载已保存的清晰度去马赛克配置失败（将使用默认配置）: %v", err)
 	}
 
 	// 启动任务调度器
@@ -72,8 +90,7 @@ func main() {
 	// 注册到全局实例，供任务取消等业务逻辑调用
 	scheduler.Default = taskScheduler
 
-	// 兜底清理：将上次非正常退出（容器被强杀、断电等）残留的 running 任务标记为失败，
-	// 避免任务永远停留在 running 状态而无法重新调度
+	// 兜底清理：将上次非正常退出（容器被强杀、断电等）残留的 running 任务标记为失败
 	if affected, err := model.TaskMarkRunningAsFailed(context.Background(), "服务异常终止"); err != nil {
 		log.Printf("清理残留运行中任务失败: %v", err)
 	} else if affected > 0 {

@@ -9,6 +9,8 @@ func uninstallComponent(ctx context.Context, sessionID string, componentType Com
 	switch componentType {
 	case ComponentLada:
 		return uninstallLada(ctx, sessionID, events)
+	case ComponentVideo2X:
+		return uninstallVideo2X(ctx, sessionID, events)
 	case ComponentFFmpeg:
 		return uninstallFFmpeg(ctx, sessionID, events)
 	default:
@@ -63,5 +65,18 @@ func uninstallFFmpeg(ctx context.Context, sessionID string, events chan<- Progre
 		sendEvent(sessionID, events, "uninstall.completed", "Please use your system package manager to uninstall FFmpeg", "running")
 	}
 
+	return nil
+}
+
+func uninstallVideo2X(ctx context.Context, sessionID string, events chan<- ProgressEvent) error {
+	sendEvent(sessionID, events, "uninstall.rmi", "Removing Video2X image...", "running")
+	_, err := runCommand(ctx, "docker", "rmi", "ghcr.io/k4yt3x/video2x:latest")
+	if err != nil {
+		sendEvent(sessionID, events, "uninstall.rmi", "Image may not exist or is in use, continuing...", "running")
+	} else {
+		sendEvent(sessionID, events, "uninstall.rmi", "Image removed", "running")
+	}
+
+	sendEvent(sessionID, events, "uninstall.completed", "Video2X uninstalled successfully", "running")
 	return nil
 }

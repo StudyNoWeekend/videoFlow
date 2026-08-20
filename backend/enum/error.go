@@ -58,8 +58,19 @@ var (
 	ErrTaskNotCompleted        = NewBizError(10070004, "任务尚未完成，无法导出字幕", 400)
 	ErrTaskNoResult            = NewBizError(10070005, "任务暂无可用字幕结果", 404)
 	ErrTaskNotCancelable       = NewBizError(10070006, "仅等待中或运行中的任务可以取消", 400)
-	ErrSubtitleNotCompleted    = NewBizError(10040002, "请先完成字幕生成", 400)
 
 	// 字幕导出相关错误
 	ErrInvalidSubtitleFormat = NewBizError(10080001, "字幕格式参数错误，仅支持 srt/vtt/ass", 400)
+
+	// 认证相关错误
+	ErrUserNotFound          = NewBizError(10090001, "用户不存在", 400)
+	ErrUserExists            = NewBizError(10090002, "系统已初始化，不能重复初始化", 400)
+	ErrInvalidPassword       = NewBizError(10090003, "密码错误", 400)
+	ErrInvalidToken          = NewBizError(10090004, "重置令牌无效或已过期", 400)
+	ErrSamePassword          = NewBizError(10090005, "新密码不能与旧密码相同", 400)
+	ErrTokenExpired          = NewBizError(10090006, "Token 已过期，请重新登录", 401)
+	ErrTokenInvalid          = NewBizError(10090007, "无效的 Token", 401)
+	ErrResetTokenTooFrequent = NewBizError(10090008, "请求过于频繁，请稍后再试", 429)
+	ErrInvalidUsername       = NewBizError(10090009, "用户名需为 3-64 位字母和数字的组合", 400)
+	ErrWeakPassword          = NewBizError(10090010, "密码至少 6 位，且必须同时包含字母和数字", 400)
 )

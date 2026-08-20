@@ -28,10 +28,14 @@ const (
 	defaultSubtitleConcurrency = 2
 	// defaultSubtitleBurnConcurrency 默认字幕写入视频并发数
 	defaultSubtitleBurnConcurrency = 1
-	// defaultRepairConcurrency 默认修复并发数
+	// defaultRepairConcurrency 默认去马赛克并发数
 	defaultRepairConcurrency = 1
 	// defaultTranslateConcurrency 默认翻译并发数
 	defaultTranslateConcurrency = 1
+	// defaultUpscaleConcurrency 默认清晰度去马赛克并发数
+	defaultUpscaleConcurrency = 1
+	// defaultPollInterval 默认调度器轮询间隔（秒）
+	defaultPollInterval = 2
 	// maxConcurrencyLimit 允许设置的最大并发数上限
 	maxConcurrencyLimit = 50
 )
@@ -39,14 +43,18 @@ const (
 // TaskScheduler 基于 SQLite 的任务调度器
 type TaskScheduler struct {
 	db *gorm.DB
-		// subtitleConcurrency 当前允许同时运行的字幕任务数量
-		subtitleConcurrency atomic.Int32
-		// subtitleBurnConcurrency 当前允许同时运行的字幕写入视频任务数量
-		subtitleBurnConcurrency atomic.Int32
-		// repairConcurrency 当前允许同时运行的修复任务数量
-		repairConcurrency atomic.Int32
+	// subtitleConcurrency 当前允许同时运行的字幕任务数量
+	subtitleConcurrency atomic.Int32
+	// subtitleBurnConcurrency 当前允许同时运行的字幕写入视频任务数量
+	subtitleBurnConcurrency atomic.Int32
+	// repairConcurrency 当前允许同时运行的去马赛克任务数量
+	repairConcurrency atomic.Int32
 	// translateConcurrency 当前允许同时运行的翻译任务数量
 	translateConcurrency atomic.Int32
+	// upscaleConcurrency 当前允许同时运行的清晰度去马赛克任务数量
+	upscaleConcurrency atomic.Int32
+	// pollInterval 调度器轮询间隔（秒），运行时可通过 settings 表动态调整
+	pollInterval atomic.Int32
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -108,32 +116,35 @@ func (s *TaskScheduler) Stop() {
 func (s *TaskScheduler) supervisorLoop() {
 	defer s.wg.Done()
 
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
-
 	// 启动时立即执行一次
 	s.loadConcurrency()
 	s.adjustWorkers()
 	s.dispatchPending()
 
+	timer := time.NewTimer(time.Duration(s.pollInterval.Load()) * time.Second)
+	defer timer.Stop()
+
 	for {
 		select {
-		case <-ticker.C:
+		case <-timer.C:
 			s.loadConcurrency()
 			s.adjustWorkers()
 			s.dispatchPending()
+			timer.Reset(time.Duration(s.pollInterval.Load()) * time.Second)
 		case <-s.ctx.Done():
 			// 停止前将并发数调整为 0，通知多余 worker 退出
 			s.subtitleConcurrency.Store(0)
 			s.subtitleBurnConcurrency.Store(0)
 			s.repairConcurrency.Store(0)
+			s.translateConcurrency.Store(0)
+			s.upscaleConcurrency.Store(0)
 			s.adjustWorkers()
 			return
 		}
 	}
 }
 
-// loadConcurrency 从 settings 表加载字幕/字幕写入/修复/翻译并发数
+// loadConcurrency 从 settings 表加载字幕/字幕写入/去马赛克并发数及调度器轮询间隔
 func (s *TaskScheduler) loadConcurrency() {
 	subtitle := parseConcurrency(
 		model.SettingGetOrDefault(s.ctx, model.SettingKeySubtitleConcurrency, model.DefaultSubtitleConcurrency),
@@ -151,17 +162,28 @@ func (s *TaskScheduler) loadConcurrency() {
 		model.SettingGetOrDefault(s.ctx, model.SettingKeyTranslateConcurrency, model.DefaultTranslateConcurrency),
 		defaultTranslateConcurrency,
 	)
+	upscale := parseConcurrency(
+		model.SettingGetOrDefault(s.ctx, model.SettingKeyUpscaleConcurrency, model.DefaultUpscaleConcurrency),
+		defaultUpscaleConcurrency,
+	)
+	pollInterval := parsePollInterval(
+		model.SettingGetOrDefault(s.ctx, model.SettingKeySchedulerPollInterval, defaultPollIntervalStr()),
+	)
 
 	oldSubtitle := s.subtitleConcurrency.Load()
 	oldSubtitleBurn := s.subtitleBurnConcurrency.Load()
 	oldRepair := s.repairConcurrency.Load()
 	oldTranslate := s.translateConcurrency.Load()
-	if oldSubtitle != int32(subtitle) || oldSubtitleBurn != int32(subtitleBurn) || oldRepair != int32(repair) || oldTranslate != int32(translate) {
+	oldUpscale := s.upscaleConcurrency.Load()
+	oldPollInterval := s.pollInterval.Load()
+	if oldSubtitle != int32(subtitle) || oldSubtitleBurn != int32(subtitleBurn) || oldRepair != int32(repair) || oldTranslate != int32(translate) || oldUpscale != int32(upscale) || oldPollInterval != int32(pollInterval) {
 		s.subtitleConcurrency.Store(int32(subtitle))
 		s.subtitleBurnConcurrency.Store(int32(subtitleBurn))
 		s.repairConcurrency.Store(int32(repair))
 		s.translateConcurrency.Store(int32(translate))
-		logger.Logger.Info("调度器并发数已调整",
+		s.upscaleConcurrency.Store(int32(upscale))
+		s.pollInterval.Store(int32(pollInterval))
+		logger.Logger.Info("调度器并发数与轮询间隔已调整",
 			zap.Int("old_subtitle_concurrency", int(oldSubtitle)),
 			zap.Int("new_subtitle_concurrency", subtitle),
 			zap.Int("old_subtitle_burn_concurrency", int(oldSubtitleBurn)),
@@ -170,6 +192,10 @@ func (s *TaskScheduler) loadConcurrency() {
 			zap.Int("new_repair_concurrency", repair),
 			zap.Int("old_translate_concurrency", int(oldTranslate)),
 			zap.Int("new_translate_concurrency", translate),
+			zap.Int("old_upscale_concurrency", int(oldUpscale)),
+			zap.Int("new_upscale_concurrency", upscale),
+			zap.Int("old_poll_interval", int(oldPollInterval)),
+			zap.Int("new_poll_interval", pollInterval),
 		)
 	}
 }
@@ -186,9 +212,29 @@ func parseConcurrency(valueStr string, defaultValue int) int {
 	return v
 }
 
+// parsePollInterval 解析调度器轮询间隔（秒），非法值返回默认值
+func parsePollInterval(valueStr string) int {
+	if valueStr == "" {
+		return defaultPollInterval
+	}
+	v, err := strconv.Atoi(valueStr)
+	if err != nil || v < 1 {
+		return defaultPollInterval
+	}
+	return v
+}
+
+// defaultPollIntervalStr 调度器轮询间隔默认值：优先取配置文件，未配置时用内置默认值
+func defaultPollIntervalStr() string {
+	if bootstrap.Config != nil && bootstrap.Config.Scheduler.PollInterval > 0 {
+		return strconv.Itoa(bootstrap.Config.Scheduler.PollInterval)
+	}
+	return model.DefaultSchedulerPollInterval
+}
+
 // adjustWorkers 根据当前最大并发数增加或减少 worker 协程
 func (s *TaskScheduler) adjustWorkers() {
-	target := int(s.subtitleConcurrency.Load() + s.subtitleBurnConcurrency.Load() + s.repairConcurrency.Load() + s.translateConcurrency.Load())
+	target := int(s.subtitleConcurrency.Load() + s.subtitleBurnConcurrency.Load() + s.repairConcurrency.Load() + s.upscaleConcurrency.Load())
 
 	s.workerMu.Lock()
 	defer s.workerMu.Unlock()
@@ -272,10 +318,10 @@ func (s *TaskScheduler) getCancel(taskID string) context.CancelFunc {
 }
 
 // CancelByID 取消指定任务。
-// - 等待中的任务：直接落定为 cancelled（原子更新，与调度器认领并发安全）；
-// - 运行中的任务：置为 cancelling 并触发其独立 context 取消，正在执行的
-//   ffmpeg/docker/ASR/Ollama 调用随即被中断，worker 最终将其落定为 cancelled；
-// - 已是 cancelling：幂等返回成功。
+//   - 等待中的任务：直接落定为 cancelled（原子更新，与调度器认领并发安全）；
+//   - 运行中的任务：置为 cancelling 并触发其独立 context 取消，正在执行的
+//     ffmpeg/docker/ASR/Ollama 调用随即被中断，worker 最终将其落定为 cancelled；
+//   - 已是 cancelling：幂等返回成功。
 func (s *TaskScheduler) CancelByID(ctx context.Context, taskID string) error {
 	if taskID == "" {
 		return enum.ErrInvalidParam
@@ -341,7 +387,7 @@ func (s *TaskScheduler) dispatchPending() {
 	s.dispatchPendingByType(model.TaskTypeSubtitle, s.subtitleConcurrency.Load())
 	s.dispatchPendingByType(model.TaskTypeSubtitleBurn, s.subtitleBurnConcurrency.Load())
 	s.dispatchPendingByType(model.TaskTypeDeblur, s.repairConcurrency.Load())
-	s.dispatchPendingByType(model.TaskTypeTranslate, s.translateConcurrency.Load())
+	s.dispatchPendingByType(model.TaskTypeUpscale, s.upscaleConcurrency.Load())
 }
 
 // dispatchPendingByType 按任务类型认领并派发 pending 任务
@@ -410,23 +456,22 @@ func (s *TaskScheduler) processTask(ctx context.Context, task *model.Task) {
 		}
 	}()
 
-		switch task.TaskType {
-		case model.TaskTypeSubtitle:
-			s.processSubtitleTask(ctx, task)
-		case model.TaskTypeSubtitleBurn:
-			s.processSubtitleBurnTask(ctx, task)
-		case model.TaskTypeDeblur, model.TaskTypeRepair:
-			s.processRepairTask(ctx, task)
-		case model.TaskTypeTranslate:
-			s.processTranslateTask(ctx, task)
+	switch task.TaskType {
+	case model.TaskTypeSubtitle:
+		s.processSubtitleTask(ctx, task)
+	case model.TaskTypeSubtitleBurn:
+		s.processSubtitleBurnTask(ctx, task)
+	case model.TaskTypeDeblur, model.TaskTypeRepair:
+		s.processRepairTask(ctx, task)
+	case model.TaskTypeUpscale:
+		s.processUpscaleTask(ctx, task)
 	default:
 		s.markFailed(ctx, task, fmt.Errorf("未知的任务类型: %s", task.TaskType))
 	}
 }
 
-	
-	// processSubtitleTask 执行字幕生成任务：提取音频 -> ASR -> 保存 SRT 文件
-	func (s *TaskScheduler) processSubtitleTask(ctx context.Context, task *model.Task) {
+// processSubtitleTask 执行字幕生成任务：提取音频 -> ASR -> 保存 SRT 文件
+func (s *TaskScheduler) processSubtitleTask(ctx context.Context, task *model.Task) {
 	if bootstrap.ASRProvider == nil {
 		s.markFailed(ctx, task, fmt.Errorf("ASR Provider 未初始化"))
 		return
@@ -573,10 +618,22 @@ func (s *TaskScheduler) processSubtitleBurnTask(ctx context.Context, task *model
 	}
 	s.updateProgress(ctx, task.ID, 50, "SRT 文件已找到，正在将字幕写入视频")
 
-	// 4. 将字幕烧录到视频中（硬字幕），带实时进度回传
+	// 4. 确定实际处理源文件：优先使用用户选择的衍生视频（如去马赛克视频），否则为原视频
+	sourcePath := video.Path
+	if task.SourcePath != "" {
+		sourcePath = task.SourcePath
+		// 源文件在创建任务时已校验为存在且位于原视频同名输出目录内
+		if _, err := os.Stat(sourcePath); err != nil {
+			s.markFailed(ctx, task, fmt.Errorf("处理源文件不存在: %s", sourcePath))
+			return
+		}
+	}
+	s.updateProgress(ctx, task.ID, 55, "正在将字幕写入视频")
+
+	// 5. 将字幕烧录到视频中（硬字幕），带实时进度回传
 	subtitledPath := filepath.Join(outputDir, baseName+"_subtitled"+videoExt)
 	lastBurnUpdate := time.Now()
-	if err := ffmpeg.BurnSubtitles(ctx, video.Path, srtFilePath, subtitledPath, func(currentBytes, totalBytes int64) {
+	if err := ffmpeg.BurnSubtitles(ctx, sourcePath, srtFilePath, subtitledPath, func(currentBytes, totalBytes int64) {
 		// 节流：至少间隔 2 秒更新一次，避免频繁写库
 		if time.Since(lastBurnUpdate) < 2*time.Second {
 			return
@@ -607,7 +664,7 @@ func (s *TaskScheduler) processSubtitleBurnTask(ctx context.Context, task *model
 	)
 }
 
-// processRepairTask 执行视频修复任务：本地执行 Docker 修复命令 -> 保存输出
+// processRepairTask 执行去马赛克任务：本地执行 Docker 去马赛克命令 -> 保存输出
 func (s *TaskScheduler) processRepairTask(ctx context.Context, task *model.Task) {
 	if bootstrap.RepairExecutor == nil {
 		s.markFailed(ctx, task, fmt.Errorf("视频去马赛克执行器未初始化"))
@@ -627,7 +684,7 @@ func (s *TaskScheduler) processRepairTask(ctx context.Context, task *model.Task)
 		s.markFailed(ctx, task, fmt.Errorf("视频记录不存在"))
 		return
 	}
-		s.updateProgress(ctx, task.ID, 50, "正在获取视频信息，准备去马赛克")
+	s.updateProgress(ctx, task.ID, 50, "正在获取视频信息，准备去马赛克")
 
 	// 2. 确定实际处理源文件：优先使用用户选择的衍生视频（如字幕合成视频），否则为原视频
 	sourcePath := video.Path
@@ -658,11 +715,11 @@ func (s *TaskScheduler) processRepairTask(ctx context.Context, task *model.Task)
 			s.markFailed(ctx, task, fmt.Errorf("创建视频硬链接失败: %w", err))
 			return
 		}
-		// 无论修复成功或失败，最后都清理硬链接
+		// 无论去马赛克成功或失败，最后都清理硬链接
 		defer os.Remove(linkedPath)
 	}
 
-	// 4. 调用修复执行器，传入输出目录中的源文件路径，
+	// 4. 调用去马赛克执行器，传入输出目录中的源文件路径，
 	//    repair 会自动以 linkedPath 的父目录（即输出目录）为 Docker mount 根目录
 	lastProgress := -1
 	lastProgressMsg := ""
@@ -696,6 +753,94 @@ func (s *TaskScheduler) processRepairTask(ctx context.Context, task *model.Task)
 
 	s.markCompleted(ctx, task.ID, output, "视频去马赛克完成")
 	logger.Logger.Info("去马赛克任务执行完成",
+		zap.String("task_id", task.ID),
+		zap.String("video_path", video.Path),
+	)
+}
+
+// processUpscaleTask 执行清晰度去马赛克任务：本地执行 Docker 清晰度去马赛克命令 -> 保存输出
+func (s *TaskScheduler) processUpscaleTask(ctx context.Context, task *model.Task) {
+	if bootstrap.UpscaleExecutor == nil {
+		s.markFailed(ctx, task, fmt.Errorf("清晰度去马赛克执行器未初始化"))
+		return
+	}
+
+	s.updateProgress(ctx, task.ID, 0, "任务已启动，正在准备")
+
+	// 1. 获取视频信息
+	video, err := model.VideoGetByID(ctx, task.VideoID)
+	if err != nil {
+		s.markFailed(ctx, task, fmt.Errorf("获取视频信息失败: %w", err))
+		return
+	}
+	if video == nil {
+		s.markFailed(ctx, task, fmt.Errorf("视频记录不存在"))
+		return
+	}
+	s.updateProgress(ctx, task.ID, 10, "正在获取视频信息")
+
+	// 2. 确定实际处理源文件
+	sourcePath := video.Path
+	if task.SourcePath != "" {
+		sourcePath = task.SourcePath
+		if _, err := os.Stat(sourcePath); err != nil {
+			s.markFailed(ctx, task, fmt.Errorf("处理源文件不存在: %s", sourcePath))
+			return
+		}
+	}
+
+	// 3. 确定目标分辨率
+	targetWidth := task.TargetWidth
+	targetHeight := task.TargetHeight
+	if targetWidth <= 0 || targetHeight <= 0 {
+		s.markFailed(ctx, task, fmt.Errorf("目标分辨率无效: %dx%d", targetWidth, targetHeight))
+		return
+	}
+
+	// 4. 准备输出目录
+	videoDir := filepath.Dir(video.Path)
+	videoBase := filepath.Base(video.Path)
+	videoExt := filepath.Ext(videoBase)
+	baseName := strings.TrimSuffix(videoBase, videoExt)
+	outputDir := filepath.Join(videoDir, baseName)
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		s.markFailed(ctx, task, fmt.Errorf("创建输出目录失败: %w", err))
+		return
+	}
+
+	// 5. 调用清晰度去马赛克执行器
+	lastProgress := -1
+	lastProgressMsg := ""
+	lastUpdateAt := time.Time{}
+	output, err := bootstrap.UpscaleExecutor.Execute(ctx, sourcePath, targetWidth, targetHeight, func(progress int, message string) {
+		now := time.Now()
+		progressChanged := progress != lastProgress
+		msgChanged := message != "" && message != lastProgressMsg
+
+		if !progressChanged && (!msgChanged || now.Sub(lastUpdateAt) < 5*time.Second) {
+			return
+		}
+
+		lastProgress = progress
+		if msgChanged {
+			lastProgressMsg = message
+		}
+		lastUpdateAt = now
+		s.updateProgress(ctx, task.ID, progress, lastProgressMsg)
+		logger.Logger.Info("清晰度修复进度更新",
+			zap.String("task_id", task.ID),
+			zap.Int("progress", progress),
+			zap.String("message", lastProgressMsg),
+		)
+	}, task.UpscaleProcessor, task.UpscaleModel, task.UpscaleNoiseLevel)
+	if err != nil {
+		// 失败时 output 恒为空，真实输出已由 Execute 拼入错误信息，避免多余的 “output: ” 后缀
+		s.markFailed(ctx, task, fmt.Errorf("清晰度修复失败: %w", err))
+		return
+	}
+
+	s.markCompleted(ctx, task.ID, output, "清晰度修复完成")
+	logger.Logger.Info("清晰度去马赛克任务执行完成",
 		zap.String("task_id", task.ID),
 		zap.String("video_path", video.Path),
 	)
@@ -777,114 +922,6 @@ func (s *TaskScheduler) markCancelled(ctx context.Context, task *model.Task, msg
 			zap.Error(e),
 		)
 	}
-}
-
-// processTranslateTask 执行字幕翻译任务：获取字幕 -> 翻译 -> 保存结果
-func (s *TaskScheduler) processTranslateTask(ctx context.Context, task *model.Task) {
-	// 1. 检查 TranslationExecutor 是否已初始化
-	if bootstrap.TranslationExecutor == nil {
-		s.markFailed(ctx, task, fmt.Errorf("翻译执行器未初始化"))
-		return
-	}
-
-	// 更新进度：任务启动
-	s.updateProgress(ctx, task.ID, 0, "")
-
-	// 2. 获取视频信息
-	video, err := model.VideoGetByID(ctx, task.VideoID)
-	if err != nil {
-		s.markFailed(ctx, task, fmt.Errorf("获取视频信息失败: %w", err))
-		return
-	}
-	if video == nil {
-		s.markFailed(ctx, task, fmt.Errorf("视频记录不存在"))
-		return
-	}
-	s.updateProgress(ctx, task.ID, 10, "")
-
-	// 3. 获取最近的字幕任务
-	subtitleTask, err := model.TaskGetLatestByVideoIDAndType(ctx, task.VideoID, model.TaskTypeSubtitle)
-	if err != nil {
-		s.markFailed(ctx, task, fmt.Errorf("获取字幕任务失败: %w", err))
-		return
-	}
-	if subtitleTask == nil {
-		s.markFailed(ctx, task, fmt.Errorf("未找到对应的字幕任务"))
-		return
-	}
-	if subtitleTask.Status != model.TaskStatusCompleted {
-		s.markFailed(ctx, task, fmt.Errorf("字幕任务尚未完成，当前状态: %s", subtitleTask.Status))
-		return
-	}
-	s.updateProgress(ctx, task.ID, 20, "")
-
-	// 4. 从字幕任务的 ResultJSON 中提取字幕片段
-	segments, err := subtitle.ParseSegments(subtitleTask.ResultJSON)
-	if err != nil {
-		s.markFailed(ctx, task, fmt.Errorf("解析字幕结果失败: %w", err))
-		return
-	}
-	if len(segments) == 0 {
-		s.markFailed(ctx, task, fmt.Errorf("字幕内容为空"))
-		return
-	}
-	s.updateProgress(ctx, task.ID, 30, "")
-
-	// 5. 提取所有字幕文本，只翻译文本内容，不发送时间轴和序号
-	texts := make([]string, 0, len(segments))
-	for _, seg := range segments {
-		texts = append(texts, seg.Text)
-	}
-	s.updateProgress(ctx, task.ID, 40, fmt.Sprintf("共 %d 条字幕，开始翻译", len(texts)))
-
-	// 6. 调用翻译执行器一次性翻译所有文本
-	translatedTexts, err := bootstrap.TranslationExecutor.TranslateTexts(ctx, texts)
-	if err != nil {
-		s.markFailed(ctx, task, fmt.Errorf("翻译失败: %w", err))
-		return
-	}
-	s.updateProgress(ctx, task.ID, 70, "翻译完成，正在生成 SRT")
-
-	// 7. 将翻译结果回填到字幕片段中
-	for i := range segments {
-		if i < len(translatedTexts) {
-			segments[i].Text = translatedTexts[i]
-		}
-	}
-	s.updateProgress(ctx, task.ID, 80, "")
-
-	// 8. 用翻译后的文本生成 SRT 文件
-	translatedSRT := subtitle.ToSRT(segments)
-
-	// 9. 保存翻译结果到文件
-	// 生成输出文件路径：视频同名输出目录，文件名加 _translated.srt
-	videoDir := filepath.Dir(video.Path)
-	videoName := filepath.Base(video.Path)
-	videoExt := filepath.Ext(videoName)
-	baseName := strings.TrimSuffix(videoName, videoExt)
-	outputDir := filepath.Join(videoDir, baseName)
-	if err := os.MkdirAll(outputDir, 0755); err != nil {
-		s.markFailed(ctx, task, fmt.Errorf("创建输出目录失败: %w", err))
-		return
-	}
-	translatedFileName := baseName + "_translated.srt"
-	translatedFilePath := filepath.Join(outputDir, translatedFileName)
-
-	// 写入文件
-	if err := os.WriteFile(translatedFilePath, []byte(translatedSRT), 0644); err != nil {
-		s.markFailed(ctx, task, fmt.Errorf("保存翻译文件失败: %w", err))
-		return
-	}
-	s.updateProgress(ctx, task.ID, 90, "翻译文件已保存")
-
-	// 8. 标记任务完成，将翻译文件路径保存到结果中
-	resultJSON := fmt.Sprintf(`{"translated_file": "%s"}`, translatedFilePath)
-	s.markCompleted(ctx, task.ID, resultJSON, "字幕翻译完成")
-	logger.Logger.Info("翻译任务执行完成",
-		zap.String("task_id", task.ID),
-		zap.String("video_id", task.VideoID),
-		zap.String("translated_file", translatedFilePath),
-	)
 }
 
 // humanizeBytes 将字节数格式化为可读的大小字符串，例如 122M、1.5G

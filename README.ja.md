@@ -2,9 +2,9 @@
 
 # VideoFlow
 
-### Whisper + FFmpeg に Web ベースの可視化管理を -- 動画ディレクトリをスキャンし、字幕を自動生成、壊れた動画はワンクリックで修復。
+### Whisper + FFmpeg に Web ベースの可視化管理を -- 動画ディレクトリをスキャンし、字幕を自動生成、壊れた動画はワンクリックでモザイク除去。
 
-Whisper ASR + FFmpeg + Docker 修復エンジンをベースに、Vue 3 + Element Plus で構築した Web 可視化管理インターフェースです。スクリプトの組み合わせから解放され、スキャンでの取り込み、タスク作成、リアルタイムの進捗、オンライン設定まで、すべてブラウザ上で完結します。バックエンドは Go（Gin + GORM + SQLite）で、Docker によるワンクリックデプロイに対応しています。
+Whisper ASR + FFmpeg + Docker モザイク除去エンジンをベースに、Vue 3 + Element Plus で構築した Web 可視化管理インターフェースです。スクリプトの組み合わせから解放され、スキャンでの取り込み、タスク作成、リアルタイムの進捗、オンライン設定まで、すべてブラウザ上で完結します。バックエンドは Go（Gin + GORM + SQLite）で、Docker によるワンクリックデプロイに対応しています。
 
 [![Stars](https://img.shields.io/github/stars/StudyNoWeekend/videoFlow?style=flat-square&logo=github&color=yellow)](https://github.com/StudyNoWeekend/videoFlow/stargazers)
 [![Forks](https://img.shields.io/github/forks/StudyNoWeekend/videoFlow?style=flat-square&logo=github&color=blue)](https://github.com/StudyNoWeekend/videoFlow/network/members)
@@ -24,7 +24,7 @@ Whisper ASR + FFmpeg + Docker 修復エンジンをベースに、Vue 3 + Elemen
 
 ## 💡 プロジェクトの魅力
 
-本プロジェクトの最大の魅力は、**Whisper による音声認識、FFmpeg による音声処理、Docker による動画修復という、本来ならスクリプトを組み合わせてつなぎ合わせる必要のある 3 つの処理を、すぐに使える Web 可視化管理プラットフォームとして統合したこと**です。
+本プロジェクトの最大の魅力は、**Whisper による音声認識、FFmpeg による音声処理、Docker によるモザイク除去、高画質化という、本来ならスクリプトを組み合わせてつなぎ合わせる必要のある 4 つの処理を、すぐに使える Web 可視化管理プラットフォームとして統合したこと**です。
 
 Whisper や FFmpeg を単体で使うのは難しくありませんが、「ディレクトリをスキャン -> 音声を抽出 -> ASR を呼び出し -> 字幕を生成 -> タスクを並行実行 -> 進捗をトラッキング -> 失敗時にリトライ -> オンラインで設定を変更」という一連の流れを完全なパイプラインとしてつなげるのは、コマンドラインやスクリプトではなかなかスムーズにいきません。VideoFlow は、基盤となるエンジンを変更することなく、その上に Web UI の層をかぶせます：
 
@@ -32,13 +32,14 @@ Whisper や FFmpeg を単体で使うのは難しくありませんが、「デ�
 | --- | --- | --- |
 | 操作方式 | コマンドライン引数 + シェルスクリプト | ブラウザのグラフィカル UI、マウスでポチポチ |
 | 字幕生成 | 音声の手動抽出、ASR の呼び出し、字幕ファイルの組み立て | ワンクリックでタスク作成、自動で 音声抽出 -> ASR -> 字幕生成 |
-| 動画修復 | Docker コマンドを手動実行、ターミナルを見張る | ワンクリックで修復タスク、CPU / CUDA / MPS / XPU に対応 |
+| モザイク除去 | Docker コマンドを手動実行、ターミナルを見張る | ワンクリックでモザイク除去タスク、CPU / CUDA / MPS / XPU に対応 |
+| 高画質化 | 自分でツールを探し、パラメータ調整が大変 | ワンクリックで解像度アップ、Real-ESRGAN / Real-CUGAN / libplacebo を選択可能 |
 | タスク管理 | 自分で記録、ターミナルを閉じたら消える | タスクリスト + リアルタイム進捗 + 失敗リトライ + 履歴確認 |
 | 並行制御 | キュー / セマフォを自前実装 | スケジューラが設定された並行数に従って自動スケジュール |
 | 設定変更 | 設定ファイルを編集、サービスを再起動 | オンラインで変更、保存すると即座にホット反映、データベースに永続化 |
 | デプロイ形態 | 多くの依存パッケージをインストール | Docker シングルイメージ、設定をマウントするだけで実行 |
 
-基盤として [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice) の認識能力、[FFmpeg](https://ffmpeg.org/) の音声/動画処理、[`ladaapp/lada`](https://github.com/ladaapp/lada) の動画修復を再利用し、その上に HTTP API と Web フロントエンドをラップしています -- **コマンドラインの能力を、グラフィカル UI の体験で**。
+基盤として [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice) の認識能力、[FFmpeg](https://ffmpeg.org/) の音声/動画処理、[`ladaapp/lada`](https://github.com/ladaapp/lada) のモザイク除去を再利用し、その上に HTTP API と Web フロントエンドをラップしています -- **コマンドラインの能力を、グラフィカル UI の体験で**。
 
 ## 🎯 こんな方におすすめ
 
@@ -46,7 +47,7 @@ Whisper や FFmpeg を単体で使うのは難しくありませんが、「デ�
 | --- | --- |
 | **動画クリエイター / 個人メディア** | 動画に一括で字幕を生成、手書き起こしの手間を省き、SRT / VTT をエクスポートしてそのまま利用 |
 | **字幕チーム / 翻訳愛好家** | Whisper で一括文字起こししてタイムラインを生成し、その後人力で校正すれば効率が倍増 |
-| **壊れた動画をお持ちの方** | 動画が開かない？ lada Docker でワンクリック修復、多種の計算デバイスに対応 |
+| **壊れた動画をお持ちの方** | 動画が開かない？ lada Docker でワンクリックモザイク除去、多種の計算デバイスに対応 |
 | **NAS / ホームサーバー愛好家** | Docker で常時稼働させ、定期スキャンでディレクトリを自動取り込み、新規動画に自動で字幕を生成 |
 | **Whisper をローカルで動かしたい方** | スクリプトを書かずに、Web UI で ASR パラメータ（言語 / VAD / プロンプト）を設定するだけ |
 | **コマンドラインが面倒な方** | すべてグラフィカル UI で、設定、スキャン、タスク進捗がひと目で分かる |
@@ -56,9 +57,11 @@ Whisper や FFmpeg を単体で使うのは難しくありませんが、「デ�
 
 - **動画ディレクトリスキャン** - 手動スキャンまたはバックグラウンドでの定期自動スキャン、動画を自動で取り込み、カード型のページング表示
 - **字幕生成** - Whisper ASR ベース、言語、VAD フィルタ、タスクタイプ、音声の事前エンコード、初期プロンプト、単語レベルのタイムスタンプ、複数の出力形式（json / srt / vtt / txt / tsv）に対応
-- **動画修復** - Docker イメージ `ladaapp/lada` ベース、x86_64 CPU および NVIDIA CUDA GPU（Turing シリーズ以降、RTX 20xx ～ RTX 50xx シリーズ）に対応
+- **モザイク除去** - Docker イメージ `ladaapp/lada` ベース、x86_64 CPU および NVIDIA CUDA GPU（Turing シリーズ以降、RTX 20xx ～ RTX 50xx シリーズ）に対応。CUDA デバイスは自動でコンテナに透過（`--gpus`）、GPU 障害の原因を自動的にヒント表示
+- **高画質化** - Video2X（`ghcr.io/k4yt3x/video2x:latest`）で動画をより高解像度にアップスケール、Real-ESRGAN / Real-CUGAN / libplacebo プロセッサに対応。ターゲット解像度とノイズ軽減レベルはタスクごとに指定
 - **タスク管理** - 作成 / 照会 / 削除 / 失敗リトライ、タイプ別フィルタ、リアルタイムのプログレスバー、フロントエンドは 2 秒間隔でポーリング更新
-- **タスクスケジューラ** - バックグラウンドのスケジューラが設定された並行数制限に従って字幕 / 修復タスクを実行
+- **タスクスケジューラ** - バックグラウンドのスケジューラが設定された並行数制限に従って字幕 / モザイク除去 / 高画質化タスクを実行。ポーリング間隔はオンラインで設定可能
+- **ユーザー認証** - 初回起動時の管理者アカウント初期化ガイド、ログイン / パスワード変更 / パスワードリセット。業務 API はすべて JWT 認証で保護
 - **ランタイム設定** - 統合された設定ページ、すべての設定をオンラインで変更し永続化（SQLite）、保存すると即座にホット反映
 - **FFmpeg スマート呼び出し** - ローカルの ffmpeg を自動検出し、手動設定不要
 - **エンジニアリング** - `trace_id` による全リンクトラッキング、統一レスポンス構造、zap による構造化ログ、グレースフルシャットダウン（再起動時に実行中タスクを自動的に失敗扱い）
@@ -153,12 +156,12 @@ APP_HTTP_PORT=9090 go run ./cmd/api   # 后端
 
 ## 🎬 使い方
 
-1. サービスを起動し、ブラウザでフロントエンドのアドレスにアクセス
+1. サービスを起動し、ブラウザでフロントエンドのアドレスにアクセス。初回は管理者アカウントを初期化してログイン
 2. 「設定」ページでローカルの動画ディレクトリと ASR サービスのアドレスを設定し、保存
 3. 「動画リスト」ページでスキャンをクリックすると、動画が自動で取り込まれます
 4. 動画カードの「字幕を生成」をクリックして、字幕タスクを作成
 5. 「タスク管理」ページでリアルタイムの進捗を確認（2 秒ごとに自動更新）
-6. （任意）「動画修復」をクリックして壊れた動画を修復
+6. （任意）「モザイク除去」で壊れた動画を修復、または「高画質化」で動画をより高解像度にアップスケール
 7. 字幕タスクの完了後、生成された字幕ファイルを確認
 
 ## 🌐 技術スタック
@@ -172,7 +175,8 @@ APP_HTTP_PORT=9090 go run ./cmd/api   # 后端
 | ログ | [Zap](https://github.com/uber-go/zap) | 構造化ログ |
 | ASR | [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice) | 音声認識エンジン |
 | 音声/動画 | [FFmpeg](https://ffmpeg.org/) / ffprobe | 音声抽出、再生時間の検出、スマートローカル呼び出し |
-| 動画修復 | [`ladaapp/lada`](https://github.com/ladaapp/lada) | Docker 修復エンジン |
+| モザイク除去 | [`ladaapp/lada`](https://github.com/ladaapp/lada) | Docker モザイク除去エンジン |
+| 高画質化 | [Video2X](https://github.com/k4yt3x/video2x) | Docker 高画質化エンジン |
 | フロントエンド | [Vue 3](https://vuejs.org/) + [Element Plus](https://element-plus.org/) + [Vite](https://vite.dev/) | グラフィカル UI |
 | 状態管理 | [Pinia](https://pinia.vuejs.org/) | フロントエンドの状態 |
 | HTTP クライアント | [Axios](https://axios-http.com/) | API リクエスト |
@@ -247,7 +251,7 @@ viper のプレフィックスは `APP_`、設定キーの `.` は `_` に変換
 | `/app/config/config.yaml` | 設定ファイル（読み取り専用マウント） |
 | `/app/data` | SQLite データベースの永続化（`data/app.db`） |
 | `/app/logs` | ログ出力 |
-| `/var/run/docker.sock` | （任意）動画修復にはホストマシンの Docker socket をマウントする必要があります |
+| `/var/run/docker.sock` | （任意）モザイク除去 / 高画質化にはホストマシンの Docker socket をマウントする必要があります |
 
 </details>
 
@@ -266,6 +270,22 @@ viper のプレフィックスは `APP_`、設定キーの `.` は `_` に変換
 
 `code=0` は成功、0 以外は業務エラーを示します。
 
+> **認証について**：ヘルスチェック、認証 API、`/api/v1/version`、コンポーネントインストール進捗の SSE API を除き、その他の業務 API はログイン時に発行された Token をリクエストヘッダーに付ける必要があります（`Authorization: Bearer <token>`）。
+
+<details>
+<summary><b>認証 API</b></summary>
+
+| メソッド | パス | 説明 |
+| --- | --- | --- |
+| `GET` | `/api/v1/auth/status` | 初期化 / ログイン状態の確認 |
+| `POST` | `/api/v1/auth/init` | 初回実行時に管理者アカウントを初期化 |
+| `POST` | `/api/v1/auth/login/password` | ユーザー名とパスワードでログイン、Token を返却 |
+| `POST` | `/api/v1/auth/reset-token` | パスワードリセット用トークンを生成 |
+| `POST` | `/api/v1/auth/reset-password` | トークンでパスワードをリセット |
+| `POST` | `/api/v1/auth/change-password` | パスワード変更（ログインが必要） |
+
+</details>
+
 <details>
 <summary><b>ヘルスチェック</b></summary>
 
@@ -273,6 +293,7 @@ viper のプレフィックスは `APP_`、設定キーの `.` は `_` に変換
 | --- | --- | --- |
 | `GET` | `/health` | ヘルスチェック |
 | `GET` | `/ready` | レディチェック |
+| `GET` | `/api/v1/version` | 現在のバージョン |
 
 </details>
 
@@ -293,12 +314,24 @@ viper のプレフィックスは `APP_`、設定キーの `.` は `_` に変換
 
 | メソッド | パス | 説明 |
 | --- | --- | --- |
-| `POST` | `/api/v1/tasks` | タスク作成（字幕 / 修復） |
+| `POST` | `/api/v1/tasks` | タスク作成（字幕 / 字幕焼き込み / モザイク除去 / 高画質化） |
 | `GET` | `/api/v1/tasks` | タスクリストのページング照会（タイプでフィルタ可能） |
 | `POST` | `/api/v1/tasks/:id/retry` | 失敗タスクのリトライ |
 | `DELETE` | `/api/v1/tasks/:id` | タスクの削除 |
 
 タスクステータス：`pending`（保留中）-> `running`（実行中）-> `completed`（完了）/ `failed`（失敗）
+
+> **高画質化タスクのパラメータ**：作成時にターゲット解像度（`target_width` / `target_height`）を指定します。プロセッサ（`upscale_processor`：`realesrgan` / `realcugan` / `libplacebo`）、モデル（`upscale_model`）、ノイズ軽減レベル（`upscale_noise_level`、-1 ～ 3）は必要に応じて設定可能です。
+
+</details>
+
+<details>
+<summary><b>コンポーネント API</b></summary>
+
+| メソッド | パス | 説明 |
+| --- | --- | --- |
+| `GET` | `/api/v1/components` | 各コンポーネントの状態を確認（Docker / FFmpeg / Whisper ASR / lada / Video2X） |
+| `GET` | `/api/v1/components/install/progress/:session_id` | コンポーネントのインストール進捗（SSE リアルタイム配信、公開 API） |
 
 </details>
 
@@ -318,7 +351,7 @@ viper のプレフィックスは `APP_`、設定キーの `.` は `_` に変換
 videoFlow/
 ├── backend/
 │   ├── cmd/api/              # プログラムエントリ main.go
-│   ├── bootstrap/            # 設定、DB、ASR、FFmpeg、修復 などの初期化
+│   ├── bootstrap/            # 設定、DB、ASR、FFmpeg、モザイク除去 などの初期化
 │   ├── config/               # 設定ファイル（config.yaml.local がテンプレート）
 │   ├── internal/
 │   │   ├── controller/       # HTTP コントローラ
@@ -328,7 +361,8 @@ videoFlow/
 │   │   ├── router/           # ルーティング登録
 │   │   ├── asr/              # ASR クライアント
 │   │   ├── ffmpeg/           # FFmpeg ローカル実行器
-│   │   ├── repair/               # 動画修復実行器
+│   │   ├── repair/           # モザイク除去実行器
+│   │   ├── upscale/          # 高画質化実行器
 │   │   ├── subtitle/         # 字幕パース
 │   │   ├── scanner/          # 動画ディレクトリスキャナ
 │   │   └── scheduler/        # タスクスケジューラ
@@ -349,7 +383,8 @@ videoFlow/
 ## 🛡️ 注意事項
 
 - **FFmpeg は必須**：`ffmpeg.provider` は `local` 固定、イメージに ffmpeg が内蔵されています。ローカルでソースから実行する場合は各自でインストールしてください
-- **動画修復には Docker が必要**：コンテナデプロイ時にホストマシンの Docker socket をマウントする必要があります。この機能を使わない場合は無視でき、サービスの起動には影響しません
+- **モザイク除去 / 高画質化には Docker が必要**：コンテナデプロイ時にホストマシンの Docker socket をマウントする必要があります。この機能を使わない場合は無視でき、サービスの起動には影響しません
+- **初回使用時は初期化が必要**：ブラウザでの初回アクセス時に管理者アカウントの初期化が案内され、ログイン後に業務機能を利用できます
 - **ASR サービスは各自で用意**：[Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice) をご自身でデプロイし、`asr.url` を設定してください
 - **データベースの永続化**：デフォルトは `data/app.db`、Docker デプロイ時は必ず `/app/data` ディレクトリをマウントしてください。そうしないと再起動でデータが失われます
 
@@ -363,9 +398,9 @@ videoFlow/
 </details>
 
 <details>
-<summary><b>動画修復機能が使えない？</b></summary>
+<summary><b>モザイク除去機能が使えない？</b></summary>
 
-修復は Docker に依存します。コンテナデプロイ時にホストマシンの Docker socket をマウントしてください：`-v /var/run/docker.sock:/var/run/docker.sock`。この機能を使わない場合は無視でき、サービスの起動には影響しません。
+モザイク除去は Docker に依存します。コンテナデプロイ時にホストマシンの Docker socket をマウントしてください：`-v /var/run/docker.sock:/var/run/docker.sock`。この機能を使わない場合は無視でき、サービスの起動には影響しません。
 
 </details>
 
@@ -385,16 +420,17 @@ videoFlow/
 
 ## 🗺️ Roadmap
 
-- ✅ 動画スキャン + 字幕生成 + 動画修復
+- ✅ 動画スキャン + 字幕生成 + モザイク除去
 - ✅ タスク管理 + リアルタイム進捗 + 失敗リトライ
 - ✅ ランタイム設定のオンライン変更 + 永続化
 - ✅ Docker デプロイ + 実行時のポート指定
 - ✅ FFmpeg スマートローカル呼び出し
 - ✅ マルチアーキテクチャイメージ（amd64 + arm64 ネイティブサポート）
+- ✅ ユーザー認証（ログイン / 初期化 / パスワード変更）
+- ✅ 動画の高画質化（Video2X）
 - 🔲 字幕のオンラインプレビュー / 編集
 - 🔲 字幕ファイルのエクスポート/ダウンロード
 - 🔲 API Key 認証による外部ネットワークアクセスのインターセプト
-- 🔲 動画の鮮明度修復（超解像度強化）
 
 ## 💌 謝辞
 
@@ -402,7 +438,8 @@ videoFlow/
 
 - **[Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice)** - by [@ahmetoner](https://github.com/ahmetoner)、OpenAI Whisper ベースの ASR HTTP サービス。VideoFlow の音声認識能力はすべてこれに基づいています。
 - **[FFmpeg](https://ffmpeg.org/)** - 強力な音声/動画処理ツール。音声の抽出と再生時間の検出を担います。
-- **[ladaapp/lada](https://github.com/ladaapp/lada)** - 動画修復 Docker イメージ。
+- **[ladaapp/lada](https://github.com/ladaapp/lada)** - モザイク除去 Docker イメージ。
+- **[Video2X](https://github.com/k4yt3x/video2x)** - 動画高画質化 Docker イメージ。
 - **[Gin](https://github.com/gin-gonic/gin)** / **[GORM](https://github.com/go-gorm/gorm)** / **[Viper](https://github.com/spf13/viper)** / **[Zap](https://github.com/uber-go/zap)** - 優秀な Go 基盤ライブラリ。
 - **[Vue 3](https://vuejs.org/)** / **[Element Plus](https://element-plus.org/)** / **[Vite](https://vite.dev/)** - フロントエンドの基盤。
 

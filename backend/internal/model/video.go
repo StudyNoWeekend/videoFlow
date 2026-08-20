@@ -16,6 +16,8 @@ type Video struct {
 	BaseModel
 	Path     string `gorm:"type:varchar(1024);not null;uniqueIndex:idx_video_path;comment:视频文件绝对路径" json:"path"`
 	Name     string `gorm:"type:varchar(255);not null;comment:视频文件名" json:"name"`
+	Width    int    `gorm:"default:0;comment:视频宽度（像素）" json:"width"`
+	Height   int    `gorm:"default:0;comment:视频高度（像素）" json:"height"`
 	Duration int64  `gorm:"default:0;comment:视频时长（秒）" json:"duration"`
 	Size     int64  `gorm:"default:0;comment:视频文件大小（字节）" json:"size"`
 }
@@ -80,7 +82,7 @@ func VideoGetByPath(ctx context.Context, path string) (*Video, error) {
 }
 
 // VideoUpsertByPath 按路径去重：存在则更新元信息，不存在则创建
-func VideoUpsertByPath(ctx context.Context, path string, size int64, duration int64) (*Video, error) {
+func VideoUpsertByPath(ctx context.Context, path string, size int64, duration int64, width, height int) (*Video, error) {
 	name := filepath.Base(path)
 
 	video, err := VideoGetByPath(ctx, path)
@@ -94,6 +96,8 @@ func VideoUpsertByPath(ctx context.Context, path string, size int64, duration in
 		video.Name = name
 		video.Size = size
 		video.Duration = duration
+		video.Width = width
+		video.Height = height
 		video.UpdatedAt = now
 		if err := DB.WithContext(ctx).Save(video).Error; err != nil {
 			return nil, fmt.Errorf("更新视频记录失败: %w", err)
@@ -111,6 +115,8 @@ func VideoUpsertByPath(ctx context.Context, path string, size int64, duration in
 		Name:     name,
 		Size:     size,
 		Duration: duration,
+		Width:    width,
+		Height:   height,
 	}
 	if err := VideoCreate(ctx, video); err != nil {
 		return nil, fmt.Errorf("创建视频记录失败: %w", err)

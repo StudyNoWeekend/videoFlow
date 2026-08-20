@@ -19,7 +19,10 @@ const defaultSetting: Setting = {
   subtitle_concurrency: 2,
   subtitle_burn_concurrency: 1,
   repair_concurrency: 1,
-  translate_concurrency: 1,
+  scheduler_poll_interval: 2,
+  upscale_docker_image: 'ghcr.io/k4yt3x/video2x:latest',
+  upscale_device: 'cpu',
+  upscale_concurrency: 1,
 }
 
 // 设置中心 Store，管理统一配置对象

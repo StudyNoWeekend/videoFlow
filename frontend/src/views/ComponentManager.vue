@@ -63,7 +63,7 @@ function statusIcon(status: string): string {
 
 async function handleInstall(comp: ComponentInfo): Promise<void> {
   // Lada uses disposable containers - no config needed, just pull the image directly
-  if (comp.type === 'lada') {
+  if (comp.type === 'lada' || comp.type === 'video2x') {
     updateLocalComponentStatus(comp.type, 'installing')
     installLogs.value = [t('components.install.preparing_lada')]
     installStatus.value = 'running'
@@ -369,8 +369,8 @@ onMounted(async () => {
       :title="$t('components.dialog.install.title', { name: installComponentType })"
       width="500px"
     >
-      <el-form label-width="140px" v-if="installComponentType === 'lada'">
-        <el-text>Lada 将直接拉取镜像运行，无需额外配置。</el-text>
+      <el-form label-width="140px" v-if="installComponentType === 'lada' || installComponentType === 'video2x'">
+        <el-text>{{ installComponentType === 'lada' ? 'Lada' : 'Video2X' }} 将直接拉取镜像运行，无需额外配置。</el-text>
       </el-form>
 
       <template #footer>

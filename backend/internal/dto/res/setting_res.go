@@ -17,5 +17,8 @@ type SettingRes struct {
 	SubtitleConcurrency     int    `json:"subtitle_concurrency"`
 	SubtitleBurnConcurrency int    `json:"subtitle_burn_concurrency"`
 	RepairConcurrency       int    `json:"repair_concurrency"`
-	TranslateConcurrency    int    `json:"translate_concurrency"`
+	SchedulerPollInterval   int    `json:"scheduler_poll_interval"`
+	UpscaleDockerImage      string `json:"upscale_docker_image"`
+	UpscaleDevice           string `json:"upscale_device"`
+	UpscaleConcurrency      int    `json:"upscale_concurrency"`
 }

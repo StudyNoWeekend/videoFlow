@@ -6,7 +6,7 @@ import { useSettingsStore } from '@/stores/settings'
 import type { Setting } from '@/api/setting'
 import ComponentManager from './ComponentManager.vue'
 
-const { t, locale } = useI18n()
+const { t } = useI18n()
 const settingsStore = useSettingsStore()
 const activeTab = ref('system')
 
@@ -23,20 +23,15 @@ const form = ref<Setting>({
   asr_output: 'json',
   repair_docker_image: '',
   repair_device: 'cpu',
+  upscale_docker_image: 'ghcr.io/k4yt3x/video2x:latest',
+  upscale_device: 'cpu',
+  upscale_concurrency: 1,
   subtitle_concurrency: 2,
   subtitle_burn_concurrency: 1,
   repair_concurrency: 1,
-  translate_concurrency: 1,
+  scheduler_poll_interval: 2,
 })
 const saving = ref(false)
-
-const currentLang = ref(locale.value)
-
-function handleLangChange(lang: string): void {
-  locale.value = lang as 'zh' | 'zh-TW' | 'en' | 'ja'
-  currentLang.value = lang
-  localStorage.setItem('videoflow-lang', lang)
-}
 
 async function handleSave(): Promise<void> {
   saving.value = true
@@ -133,7 +128,7 @@ onMounted(async () => {
                 </div>
               </section>
 
-              <!-- 视频修复配置 -->
+              <!-- 去马赛克配置 -->
               <section class="config-section">
                 <div class="section-marker">
                   <span class="section-marker__line"></span>
@@ -155,6 +150,28 @@ onMounted(async () => {
                 </div>
               </section>
 
+              <!-- 清晰度修复配置 -->
+              <section class="config-section">
+                <div class="section-marker">
+                  <span class="section-marker__line"></span>
+                  <span class="section-marker__label">{{ $t('settings.section.upscale') }}</span>
+                  <span class="section-marker__line"></span>
+                </div>
+                <div class="section-grid section-grid--2">
+                  <el-form-item :label="$t('settings.label.upscale_image')">
+                    <el-input v-model="form.upscale_docker_image" placeholder="ghcr.io/k4yt3x/video2x:latest" />
+                    <div class="vf-field-hint">{{ $t('settings.hint.upscale_image') }}</div>
+                  </el-form-item>
+                  <el-form-item :label="$t('settings.label.upscale_device')">
+                    <el-radio-group v-model="form.upscale_device">
+                      <el-radio-button label="cpu">CPU</el-radio-button>
+                      <el-radio-button label="cuda:0">CUDA</el-radio-button>
+                    </el-radio-group>
+                    <div class="vf-field-hint">{{ $t('settings.hint.upscale_device') }}</div>
+                  </el-form-item>
+                </div>
+              </section>
+
               <!-- 并发控制 -->
               <section class="config-section">
                 <div class="section-marker">
@@ -172,8 +189,11 @@ onMounted(async () => {
                   <el-form-item :label="$t('settings.label.repair_concurrency')">
                     <el-slider v-model="form.repair_concurrency" :min="1" :max="50" show-input />
                   </el-form-item>
-                  <el-form-item :label="$t('settings.label.translate_concurrency')">
-                    <el-slider v-model="form.translate_concurrency" :min="1" :max="50" show-input />
+                  <el-form-item :label="$t('settings.label.upscale_concurrency')">
+                    <el-slider v-model="form.upscale_concurrency" :min="1" :max="50" show-input />
+                  </el-form-item>
+                  <el-form-item :label="$t('settings.label.scheduler_poll_interval')">
+                    <el-slider v-model="form.scheduler_poll_interval" :min="1" :max="3600" show-input />
                   </el-form-item>
                 </div>
               </section>
@@ -191,26 +211,6 @@ onMounted(async () => {
         <el-tab-pane :label="$t('settings.tab.components')" name="components">
           <div class="panel-body">
             <ComponentManager />
-          </div>
-        </el-tab-pane>
-
-        <!-- Language Settings Tab -->
-        <el-tab-pane :label="$t('settings.tab.language')" name="language">
-          <div class="panel-body">
-            <section class="config-section">
-              <div class="section-marker">
-                <span class="section-marker__line"></span>
-                <span class="section-marker__label">{{ $t('settings.section.language') }}</span>
-                <span class="section-marker__line"></span>
-              </div>
-              <el-radio-group :model-value="currentLang" @change="handleLangChange">
-                <el-radio-button value="zh">{{ $t('settings.language.zh') }}</el-radio-button>
-                <el-radio-button value="zh-TW">{{ $t('settings.language.zhTW') }}</el-radio-button>
-                <el-radio-button value="en">{{ $t('settings.language.en') }}</el-radio-button>
-                <el-radio-button value="ja">{{ $t('settings.language.ja') }}</el-radio-button>
-              </el-radio-group>
-              <p class="lang-hint">{{ $t('settings.hint.immediate') }}</p>
-            </section>
           </div>
         </el-tab-pane>
       </el-tabs>
@@ -306,13 +306,26 @@ onMounted(async () => {
 }
 
 .form-actions :deep(.el-form-item__content) {
-  justify-content: flex-end;
+	justify-content: flex-end;
 }
 
-.lang-hint {
-  margin-top: 12px;
-  font-size: 12px;
+.vf-field-hint {
+  font-size: 11px;
   color: var(--vf-text-muted);
+  line-height: 1.4;
+  margin-top: 4px;
+}
+
+.option-with-desc {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.3;
+}
+
+.option-desc {
+  font-size: 11px;
+  color: var(--vf-text-muted);
+  white-space: normal;
 }
 
 @media (max-width: 1200px) {

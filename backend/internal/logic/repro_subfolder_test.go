@@ -53,7 +53,7 @@ func dumpList(t *testing.T, ctx context.Context, l *VideoLogic) {
 
 // Scenario A: 不同子文件夹中同名视频，各自带有同名输出目录
 func TestReproSubfolderSameName(t *testing.T) {
-	if err := logger.InitLogger("error"); err != nil {
+	if err := logger.InitLogger("error", ""); err != nil {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
@@ -75,7 +75,7 @@ func TestReproSubfolderSameName(t *testing.T) {
 
 // Scenario B: 子文件夹名与父目录中某个视频文件同名 -> isVideoOutputDir 误判
 func TestReproSubfolderMisfire(t *testing.T) {
-	if err := logger.InitLogger("error"); err != nil {
+	if err := logger.InitLogger("error", ""); err != nil {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
@@ -96,7 +96,7 @@ func TestReproSubfolderMisfire(t *testing.T) {
 
 // Scenario C: 视频在子文件夹，输出目录里有与其它视频混淆的文件
 func TestReproSubfolderOutput(t *testing.T) {
-	if err := logger.InitLogger("error"); err != nil {
+	if err := logger.InitLogger("error", ""); err != nil {
 		t.Fatal(err)
 	}
 	ctx := context.Background()

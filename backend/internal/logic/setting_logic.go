@@ -14,6 +14,7 @@ import (
 	"video-captions/internal/ffmpeg"
 	"video-captions/internal/model"
 	"video-captions/internal/repair"
+	"video-captions/internal/upscale"
 	"video-captions/utils/logger"
 
 	"go.uber.org/zap"
@@ -53,8 +54,10 @@ func (l *SettingLogic) GetSettings(ctx context.Context) (*res.SettingRes, error)
 	subtitleConcurrency := l.settingIntOrDefault(ctx, model.SettingKeySubtitleConcurrency, l.defaultSubtitleConcurrency(), 1, 50)
 	subtitleBurnConcurrency := l.settingIntOrDefault(ctx, model.SettingKeySubtitleBurnConcurrency, l.defaultSubtitleBurnConcurrency(), 1, 50)
 	repairConcurrency := l.settingIntOrDefault(ctx, model.SettingKeyRepairConcurrency, l.defaultRepairConcurrency(), 1, 50)
-	translateConcurrency := l.settingIntOrDefault(ctx, model.SettingKeyTranslateConcurrency, l.defaultTranslateConcurrency(), 1, 50)
-
+	schedulerPollInterval := l.settingIntOrDefault(ctx, model.SettingKeySchedulerPollInterval, l.defaultSchedulerPollInterval(), 1, 3600)
+	upscaleDockerImage := model.SettingGetOrDefault(ctx, model.SettingKeyUpscaleDockerImage, l.defaultUpscaleDockerImage())
+	upscaleDevice := model.SettingGetOrDefault(ctx, model.SettingKeyUpscaleDevice, l.defaultUpscaleDevice())
+	upscaleConcurrency := l.settingIntOrDefault(ctx, model.SettingKeyUpscaleConcurrency, l.defaultUpscaleConcurrency(), 1, 50)
 	return &res.SettingRes{
 		VideoDir:                videoDir,
 		ScanInterval:            scanInterval,
@@ -71,7 +74,10 @@ func (l *SettingLogic) GetSettings(ctx context.Context) (*res.SettingRes, error)
 		SubtitleConcurrency:     subtitleConcurrency,
 		SubtitleBurnConcurrency: subtitleBurnConcurrency,
 		RepairConcurrency:       repairConcurrency,
-		TranslateConcurrency:    translateConcurrency,
+		SchedulerPollInterval:   schedulerPollInterval,
+		UpscaleDockerImage:      upscaleDockerImage,
+		UpscaleDevice:           upscaleDevice,
+		UpscaleConcurrency:      upscaleConcurrency,
 	}, nil
 }
 
@@ -90,13 +96,16 @@ func (l *SettingLogic) UpdateSettings(ctx context.Context, updateReq *req.Settin
 	if updateReq.ScanInterval <= 0 {
 		return enum.ErrInvalidParam.WithMsg("扫描间隔必须大于 0")
 	}
-	if updateReq.SubtitleConcurrency <= 0 || updateReq.SubtitleBurnConcurrency <= 0 || updateReq.RepairConcurrency <= 0 || updateReq.TranslateConcurrency <= 0 {
+	if updateReq.SubtitleConcurrency <= 0 || updateReq.SubtitleBurnConcurrency <= 0 || updateReq.RepairConcurrency <= 0 {
 		return enum.ErrInvalidParam.WithMsg("并发数必须大于 0")
 	}
-	// 校验修复设备，支持四种：CPU（cpu）、NVIDIA CUDA（cuda:0）、Apple Silicon MPS（mps）、Intel XPU（xpu:0）
+	// 校验去马赛克设备，支持四种：CPU（cpu）、NVIDIA CUDA（cuda:0）、Apple Silicon MPS（mps）、Intel XPU（xpu:0）
 	validRepairDevices := map[string]bool{"cpu": true, "cuda:0": true, "mps": true, "xpu:0": true}
 	if !validRepairDevices[updateReq.RepairDevice] {
-		return enum.ErrInvalidParam.WithMsg("修复设备必须是 cpu、cuda:0、mps 或 xpu:0")
+		return enum.ErrInvalidParam.WithMsg("去马赛克设备必须是 cpu、cuda:0、mps 或 xpu:0")
+	}
+	if updateReq.UpscaleDevice != "" && !validRepairDevices[updateReq.UpscaleDevice] {
+		return enum.ErrInvalidParam.WithMsg("清晰度去马赛克设备必须是 cpu、cuda:0、mps 或 xpu:0")
 	}
 
 	settings := map[string]string{
@@ -115,7 +124,10 @@ func (l *SettingLogic) UpdateSettings(ctx context.Context, updateReq *req.Settin
 		model.SettingKeySubtitleConcurrency:     strconv.Itoa(updateReq.SubtitleConcurrency),
 		model.SettingKeySubtitleBurnConcurrency: strconv.Itoa(updateReq.SubtitleBurnConcurrency),
 		model.SettingKeyRepairConcurrency:       strconv.Itoa(updateReq.RepairConcurrency),
-		model.SettingKeyTranslateConcurrency:    strconv.Itoa(updateReq.TranslateConcurrency),
+		model.SettingKeySchedulerPollInterval:   strconv.Itoa(updateReq.SchedulerPollInterval),
+		model.SettingKeyUpscaleDockerImage:      updateReq.UpscaleDockerImage,
+		model.SettingKeyUpscaleDevice:           updateReq.UpscaleDevice,
+		model.SettingKeyUpscaleConcurrency:      strconv.Itoa(updateReq.UpscaleConcurrency),
 	}
 
 	for key, value := range settings {
@@ -129,7 +141,10 @@ func (l *SettingLogic) UpdateSettings(ctx context.Context, updateReq *req.Settin
 		logger.Logger.Warn("ASR 配置重新加载失败", zap.Error(err))
 	}
 	if err := l.ApplyRepairFromSettings(ctx); err != nil {
-		logger.Logger.Warn("视频修复配置重新加载失败", zap.Error(err))
+		logger.Logger.Warn("去马赛克配置重新加载失败", zap.Error(err))
+	}
+	if err := l.ApplyUpscaleFromSettings(ctx); err != nil {
+		logger.Logger.Warn("清晰度去马赛克配置重新加载失败", zap.Error(err))
 	}
 
 	return nil
@@ -151,7 +166,7 @@ func (l *SettingLogic) ApplyASRFromSettings(ctx context.Context) error {
 	return bootstrap.InitASR()
 }
 
-// ApplyRepairFromSettings 从 settings 表加载视频修复配置并立即生效（保存后/启动时调用）
+// ApplyRepairFromSettings 从 settings 表加载去马赛克配置并立即生效（保存后/启动时调用）
 func (l *SettingLogic) ApplyRepairFromSettings(ctx context.Context) error {
 	cfg := l.loadRepairConfig(ctx)
 	if bootstrap.RepairExecutor == nil {
@@ -165,11 +180,39 @@ func (l *SettingLogic) ApplyRepairFromSettings(ctx context.Context) error {
 	return bootstrap.RepairExecutor.Reload(cfg)
 }
 
-// loadRepairConfig 从 settings 表优先读取视频修复配置，未设置时回退到配置文件/默认值
+// loadRepairConfig 从 settings 表优先读取去马赛克配置，未设置时回退到配置文件/默认值
 func (l *SettingLogic) loadRepairConfig(ctx context.Context) repair.Config {
 	image := model.SettingGetOrDefault(ctx, model.SettingKeyRepairDockerImage, l.defaultRepairDockerImage())
 	device := model.SettingGetOrDefault(ctx, model.SettingKeyRepairDevice, l.defaultRepairDevice())
 	return repair.Config{DockerImage: image, Device: device}
+}
+
+// ApplyUpscaleFromSettings 从 settings 表加载清晰度去马赛克配置并立即生效（保存后/启动时调用）
+func (l *SettingLogic) ApplyUpscaleFromSettings(ctx context.Context) error {
+	cfg := l.loadUpscaleConfig(ctx)
+	if bootstrap.UpscaleExecutor == nil {
+		exec := upscale.NewExecutor(cfg)
+		if err := exec.Init(cfg); err != nil {
+			return err
+		}
+		bootstrap.UpscaleExecutor = exec
+		return nil
+	}
+	return bootstrap.UpscaleExecutor.Reload(cfg)
+}
+
+// loadUpscaleConfig 从 settings 表优先读取清晰度去马赛克配置，未设置时回退到配置文件/默认值。
+// 处理器/模型/降噪等级不在系统配置中维护，统一使用清晰度去马赛克执行器默认值兜底，由创建任务时按需覆盖。
+func (l *SettingLogic) loadUpscaleConfig(ctx context.Context) upscale.Config {
+	image := model.SettingGetOrDefault(ctx, model.SettingKeyUpscaleDockerImage, l.defaultUpscaleDockerImage())
+	device := model.SettingGetOrDefault(ctx, model.SettingKeyUpscaleDevice, l.defaultUpscaleDevice())
+	return upscale.Config{
+		DockerImage: image,
+		Device:      device,
+		Processor:   upscale.DefaultProcessor,
+		Model:       upscale.DefaultModel,
+		NoiseLevel:  upscale.DefaultNoiseLevel,
+	}
 }
 
 // loadFFmpegConfig 从 settings 表或配置文件加载 ffmpeg 配置
@@ -301,8 +344,32 @@ func (l *SettingLogic) defaultRepairConcurrency() int {
 	return 1
 }
 
-func (l *SettingLogic) defaultTranslateConcurrency() int {
-	if v, err := strconv.Atoi(model.DefaultTranslateConcurrency); err == nil {
+func (l *SettingLogic) defaultSchedulerPollInterval() int {
+	if bootstrap.Config != nil && bootstrap.Config.Scheduler.PollInterval > 0 {
+		return bootstrap.Config.Scheduler.PollInterval
+	}
+	if v, err := strconv.Atoi(model.DefaultSchedulerPollInterval); err == nil {
+		return v
+	}
+	return 2
+}
+
+func (l *SettingLogic) defaultUpscaleDockerImage() string {
+	if bootstrap.Config != nil && bootstrap.Config.Upscale.DockerImage != "" {
+		return bootstrap.Config.Upscale.DockerImage
+	}
+	return model.DefaultUpscaleDockerImage
+}
+
+func (l *SettingLogic) defaultUpscaleDevice() string {
+	if bootstrap.Config != nil && bootstrap.Config.Upscale.Device != "" {
+		return bootstrap.Config.Upscale.Device
+	}
+	return model.DefaultUpscaleDevice
+}
+
+func (l *SettingLogic) defaultUpscaleConcurrency() int {
+	if v, err := strconv.Atoi(model.DefaultUpscaleConcurrency); err == nil {
 		return v
 	}
 	return 1

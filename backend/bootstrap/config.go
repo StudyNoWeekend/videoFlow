@@ -11,6 +11,9 @@ import (
 // Config 全局配置
 var Config *AppConfig
 
+// AppVersion 应用版本号
+const AppVersion = "v0.3.0"
+
 // AppConfig 应用配置总入口
 type AppConfig struct {
 	App         AppConfigApp         `mapstructure:"app"`
@@ -23,7 +26,8 @@ type AppConfig struct {
 	Video       AppConfigVideo       `mapstructure:"video"`
 	Scan        AppConfigScan        `mapstructure:"scan"`
 	Repair      AppConfigRepair      `mapstructure:"repair"`
-	Translation AppConfigTranslation `mapstructure:"translation"`
+	Upscale     AppConfigUpscale     `mapstructure:"upscale"`
+	Scheduler   AppConfigScheduler   `mapstructure:"scheduler"`
 	Concurrency AppConfigConcurrency `mapstructure:"concurrency"`
 }
 
@@ -98,25 +102,31 @@ type AppConfigScan struct {
 	Interval int `mapstructure:"interval"`
 }
 
-// AppConfigRepair 视频修复 Docker 配置
+// AppConfigRepair 去马赛克 Docker 配置
 type AppConfigRepair struct {
 	DockerImage string `mapstructure:"docker_image"`
 	// Device 计算设备，支持四种：cpu / cuda:0（NVIDIA CUDA）/ mps（Apple Silicon）/ xpu:0（Intel XPU）
 	Device string `mapstructure:"device"`
 }
 
-// AppConfigTranslation 翻译配置
-type AppConfigTranslation struct {
-	OllamaURL      string `mapstructure:"ollama_url"`
-	Model          string `mapstructure:"model"`
-	PromptTemplate string `mapstructure:"prompt_template"`
+// AppConfigUpscale 清晰度修复 Docker 配置
+type AppConfigUpscale struct {
+	DockerImage string `mapstructure:"docker_image"`
+	// Device 计算设备，支持四种：cpu / cuda:0（NVIDIA CUDA）/ mps（Apple Silicon）/ xpu:0（Intel XPU）
+	Device    string `mapstructure:"device"`
+	Processor string `mapstructure:"processor"`
+	Model     string `mapstructure:"model"`
+}
+
+// AppConfigScheduler 调度器配置
+type AppConfigScheduler struct {
+	PollInterval int `mapstructure:"poll_interval"`
 }
 
 // AppConfigConcurrency 并发数配置
 type AppConfigConcurrency struct {
-	Subtitle  int `mapstructure:"subtitle"`
-	Repair    int `mapstructure:"repair"`
-	Translate int `mapstructure:"translate"`
+	Subtitle int `mapstructure:"subtitle"`
+	Repair   int `mapstructure:"repair"`
 }
 
 // InitConfig 初始化配置，支持环境变量覆盖

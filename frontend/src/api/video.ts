@@ -15,11 +15,14 @@ export interface Video {
   name: string
   duration: number
   size: number
+  width: number
+  height: number
   created_at: number
   updated_at: number
   subtitle_task?: TaskSnapshot
   subtitle_burn_task?: TaskSnapshot
   deblur_task?: TaskSnapshot
+  upscale_task?: TaskSnapshot
   output_dir?: string
   output_files?: OutputFile[]
 }
@@ -30,7 +33,7 @@ export interface OutputFile {
   path?: string
   size: number
   is_video: boolean
-  file_type: 'subtitle' | 'translated' | 'subtitled_video' | 'repaired_video' | 'unknown'
+  file_type: 'subtitle' | 'subtitled_video' | 'repaired_video' | 'upscaled_video' | 'unknown'
   updated_at: number
 }
 
@@ -97,4 +100,25 @@ export function updateVideo(id: string, data: VideoUpdateReq): Promise<Video> {
  */
 export function deleteVideo(id: string): Promise<void> {
   return request.delete<ApiResponse<void>>(`/api/v1/videos/${id}`).then((res) => res.data.data)
+}
+
+// 视频目录中的文件信息
+export interface DirFile {
+  name: string
+  path: string
+  size: number
+  width: number
+  height: number
+  file_type: string
+  updated_at: number
+}
+
+/**
+ * 查询视频目录中的文件列表
+ * @param videoId 视频 ID
+ */
+export function listDirFiles(videoId: string): Promise<DirFile[]> {
+  return request
+    .get<ApiResponse<DirFile[]>>(`/api/v1/videos/${videoId}/dir-files`)
+    .then((res) => res.data.data)
 }
