@@ -420,17 +420,18 @@ Defaults to `data/app.db` (SQLite). When deploying with Docker, mount the `/app/
 
 ## 🗺️ Roadmap
 
-- ✅ Video scanning + subtitle generation + deblur
-- ✅ Task management + real-time progress + failure retry
-- ✅ Online runtime config editing + persistence
-- ✅ Docker deployment + runtime port specification
-- ✅ FFmpeg smart local invocation
-- ✅ Multi-architecture images (native amd64 + arm64 support)
-- ✅ User authentication (login / initialization / change password)
-- ✅ Video upscaling (via Video2X)
-- 🔲 Subtitle online preview / editing
-- 🔲 Subtitle file export & download
-- 🔲 API Key authentication for external network access interception
+**✅ Implemented**
+
+- Video scanning (manual / scheduled) + subtitle generation (Whisper ASR)
+- Deblur (lada) + video upscaling (Video2X)
+- Subtitle burn-in (writing subtitles into the video)
+- Task management (create / cancel / retry-on-failure / real-time progress)
+- Task scheduler (concurrency control / configurable poll interval)
+- Online runtime config editing + persistence (SQLite)
+- Component management (detection & install: Docker / FFmpeg / Whisper ASR / lada / Video2X)
+- User authentication (login / initialization / change password)
+- Docker deployment + runtime port + multi-architecture images (native amd64 + arm64 support)
+- Smart local FFmpeg invocation
 
 ## 💌 Acknowledgements
 
