@@ -15,3 +15,10 @@ type VideoListReq struct {
 type VideoUpdateReq struct {
 	Name string `json:"name" binding:"required,max=255"`
 }
+
+// VideoBatchDeleteReq 视频批量删除请求
+type VideoBatchDeleteReq struct {
+	IDs []string `json:"ids" binding:"required,min=1"`
+	// DeleteFiles 是否同时删除视频对应的输出目录（srt、烧录/去马赛克/清晰度修复产物）
+	DeleteFiles bool `json:"delete_files"`
+}

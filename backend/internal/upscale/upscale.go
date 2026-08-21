@@ -512,10 +512,10 @@ func dropCR(data []byte) []byte {
 	return data
 }
 
-// outputFileName 根据输入文件路径和目标高度生成输出文件名。
+// OutputFileName 根据输入文件路径和目标高度生成输出文件名。
 // 格式：{baseName}_upscaled_{targetHeight}p{ext}
 // 例如：myvideo_upscaled_720p.mp4
-func outputFileName(videoPath string, targetHeight int) string {
+func OutputFileName(videoPath string, targetHeight int) string {
 	ext := filepath.Ext(videoPath)
 	baseName := strings.TrimSuffix(filepath.Base(videoPath), ext)
 	return fmt.Sprintf("%s_upscaled_%dp%s", baseName, targetHeight, ext)
@@ -580,7 +580,7 @@ func (e *Executor) Execute(ctx context.Context, videoPath string, targetWidth, t
 	hostParentDir := resolveHostPath(parentDir)
 
 	// 生成输出文件名
-	outFile := outputFileName(videoPath, targetHeight)
+	outFile := OutputFileName(videoPath, targetHeight)
 
 	// 用文件（净化后的）名称作为容器名称，方便识别。
 	containerName := sanitizeContainerName(baseName, videoPath) + "_upscale"

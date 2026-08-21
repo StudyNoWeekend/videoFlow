@@ -17,11 +17,16 @@ services:
       # 必需：视频目录，将宿主机视频目录挂载到容器内路径，
       #       然后在 VideoFlow 配置中将 video.dir 设为对应的容器内路径
       - /path/to/your/videos:/videos:ro
+      # 必需：任务输出目录（可写，不要加 :ro；输入目录是只读的，
+      #       任务产物 srt/烧录/修复视频一律输出到这里）
+      - /path/to/your/output:/output
       # 可选：日志目录
       - ./logs:/app/logs
     environment:
       # 覆盖配置中的视频目录（容器内挂载路径）
       - APP_VIDEO_DIR=/videos
+      # 覆盖配置中的任务输出目录（容器内挂载路径）
+      - APP_OUTPUT_DIR=/output
       # 可选：覆盖其他配置项（详见 config.yaml）
       # - APP_ASR_URL=http://host.docker.internal:9000/asr
       # - APP_REPAIR_DEVICE=cpu

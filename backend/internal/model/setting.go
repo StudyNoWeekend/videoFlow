@@ -15,6 +15,7 @@ type Setting struct {
 // 统一设置项的键名
 const (
 	SettingKeyVideoDir                = "video_dir"
+	SettingKeyOutputDir               = "output_dir"
 	SettingKeyScanInterval            = "scan_interval"
 	SettingKeyASRURL                  = "asr_url"
 	SettingKeyASRLanguage             = "asr_language"
@@ -39,6 +40,7 @@ const (
 // 统一设置项默认值（字符串形式持久化）
 const (
 	DefaultVideoDir          = ""
+	DefaultOutputDir         = ""
 	DefaultScanInterval      = "60"
 	DefaultASRURL            = "http://1.12.70.219:9999/asr"
 	DefaultASRLanguage       = "zh"

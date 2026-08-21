@@ -55,12 +55,12 @@
 
 ## ✨ 功能特性
 
-- **影片目錄掃描** - 手動掃描或背景定時自動掃描，影片自動入庫，卡片式分頁展示
+- **輸入 / 輸出目錄分離** - 掃描輸入目錄自動入庫；任務產物（字幕 / 燒錄影片 / 去馬賽克 / 清晰度修復影片）統一輸出到可設定的輸出目錄，任務狀態以影片記錄的狀態欄位為準、由任務生命週期即時同步
 - **字幕產生** - 基於 Whisper ASR，支援語言、VAD 過濾、任務類型、音訊預編碼、初始提示詞、詞級時間戳、多種輸出格式（json / srt / vtt / txt / tsv）
 - **去馬賽克** - 基於 Docker 映像 `ladaapp/lada`，支援 x86_64 CPU 以及 NVIDIA CUDA 顯示卡（Turing 系列或更高版本，包括 RTX 20xx 到 RTX 50xx 系列），CUDA 設備自動透傳（`--gpus`）、GPU 故障原因自動提示
 - **清晰度增強** - 基於 Video2X（`ghcr.io/k4yt3x/video2x:latest`）將影片升級到更高解析度，支援 Real-ESRGAN / Real-CUGAN / libplacebo 處理器，目標解析度與降噪等級按任務指定
-- **任務管理** - 建立 / 查詢 / 刪除 / 失敗重試，按類型過濾，即時進度條，前端 2 秒輪詢重新整理
-- **任務排程器** - 背景排程器按設定的並行數限制執行字幕 / 去馬賽克 / 清晰度增強任務，輪詢間隔可線上設定
+- **任務管理** - 建立 / 查詢 / 刪除（支援多選批次刪除，可勾選同時刪除輸出檔案）/ 失敗重試，按類型過濾，即時進度條，前端 2 秒輪詢重新整理；進行中的任務優先展示，同狀態下最新建立的在前
+- **任務排程器** - 背景排程器按設定的並行數限制執行字幕 / 去馬賽克 / 清晰度增強任務，輪詢間隔可線上設定，取消任務自動清理遺留的半成品輸出檔案
 - **使用者認證** - 首次啟動引導初始化管理員帳號，登入 / 修改密碼 / 密碼重設，業務 API 全部走 JWT 鑑權
 - **執行時設定** - 統一設定頁，所有設定線上修改並持久化（SQLite），儲存即熱生效
 - **FFmpeg 智慧呼叫** - 自動探測本地 ffmpeg，無需手動配置
@@ -92,6 +92,11 @@ docker run -d --name videoflow \
   -p 8080:8080 \
   -v "$PWD/config.yaml:/app/config/config.yaml:ro" \
   -v "$PWD/data:/app/data" \
+  # 影片目錄（輸入，唯讀掛載）與任務輸出目錄（可寫），掛載後在設定頁配置容器內路徑
+  -v /本機/影片/目錄:/videos:ro \
+  -v /本機/輸出/目錄:/output \
+  -e APP_VIDEO_DIR=/videos \
+  -e APP_OUTPUT_DIR=/output \
   -v "$PWD/logs:/app/logs" \
   ghcr.io/studynoweekend/videoflow:latest
 ```
@@ -122,6 +127,10 @@ docker run -d --name videoflow \
   -e APP_HTTP_PORT=8080 -p 8080:8080 \
   -v "$PWD/config.yaml:/app/config/config.yaml:ro" \
   -v "$PWD/data:/app/data" \
+  -v /本機/影片/目錄:/videos:ro \
+  -v /本機/輸出/目錄:/output \
+  -e APP_VIDEO_DIR=/videos \
+  -e APP_OUTPUT_DIR=/output \
   video-captions:latest
 ```
 
@@ -157,7 +166,7 @@ APP_HTTP_PORT=9090 go run ./cmd/api   # 後端
 ## 🎬 使用流程
 
 1. 啟動服務，瀏覽器存取前端位址；首次使用先初始化管理員帳號並登入
-2. 在「設定」頁設定本地影片目錄與 ASR 服務位址，儲存
+2. 在「設定」頁設定本地影片目錄（輸入）、任務輸出目錄與 ASR 服務位址，儲存
 3. 在「影片清單」頁點擊掃描，影片自動入庫
 4. 點影片卡片上的「產生字幕」，建立字幕任務
 5. 在「任務管理」頁查看即時進度（2 秒自動重新整理）
@@ -205,6 +214,9 @@ database:
   dsn: data/app.db
 video:
   dir: ""
+output:
+  # 任務輸出目錄（可選，留空時任務產物輸出到原影片所在目錄旁的子目錄）
+  dir: ""
 scan:
   interval: 60
 asr:
@@ -235,6 +247,7 @@ viper 前綴 `APP_`，設定鍵 `.` -> `_`，故 `http.port` 對應環境變數 
 | --- | --- | --- |
 | `APP_HTTP_PORT` | `http.port` | `8080` |
 | `APP_VIDEO_DIR` | `video.dir` | `""` |
+| `APP_OUTPUT_DIR` | `output.dir` | `""` |
 | `APP_SCAN_INTERVAL` | `scan.interval` | `60` |
 | `APP_ASR_URL` | `asr.url` | `http://127.0.0.1:9999/asr` |
 | `APP_ASR_LANGUAGE` | `asr.language` | `zh` |
@@ -251,7 +264,11 @@ viper 前綴 `APP_`，設定鍵 `.` -> `_`，故 `http.port` 對應環境變數 
 | `/app/config/config.yaml` | 設定檔（唯讀掛載） |
 | `/app/data` | SQLite 資料庫持久化（`data/app.db`） |
 | `/app/logs` | 日誌輸出 |
+| `/<容器內影片目錄>` | 將本機影片目錄掛載到容器內（如 `/videos`，唯讀），再於設定頁將 `video.dir` 設為該路徑 |
+| `/<容器內輸出目錄>` | 任務輸出目錄（如 `/output`，**必須可寫**），再於設定頁將 `output.dir` 設為該路徑 |
 | `/var/run/docker.sock` | （可選）去馬賽克 / 清晰度增強需要掛載宿主機 Docker socket |
+
+> **輸出目錄掛載說明：** 任務產物（srt / 燒錄影片 / 去馬賽克 / 清晰度修復影片）統一輸出到設定頁的 `output.dir` 容器內路徑（如 `/output`），該路徑必須為可寫掛載；輸入目錄為唯讀掛載，產物不能寫到輸入目錄。影片在輸入目錄子資料夾時，輸出會鏡像該相對結構（如 `output/<子資料夾>/<影片名>/`）。
 
 </details>
 
@@ -304,6 +321,7 @@ viper 前綴 `APP_`，設定鍵 `.` -> `_`，故 `http.port` 對應環境變數 
 | --- | --- | --- |
 | `POST` | `/api/v1/videos/scan` | 掃描影片目錄入庫 |
 | `GET` | `/api/v1/videos` | 分頁查詢影片清單 |
+| `POST` | `/api/v1/videos/batch-delete` | 批次刪除影片記錄（body 傳 `ids`，可選 `delete_files` 同時刪除輸出目錄） |
 | `PUT` | `/api/v1/videos/:id` | 更新影片資訊 |
 | `DELETE` | `/api/v1/videos/:id` | 刪除影片記錄 |
 
@@ -315,11 +333,14 @@ viper 前綴 `APP_`，設定鍵 `.` -> `_`，故 `http.port` 對應環境變數 
 | 方法 | 路徑 | 說明 |
 | --- | --- | --- |
 | `POST` | `/api/v1/tasks` | 建立任務（字幕 / 字幕燒錄 / 去馬賽克 / 清晰度增強） |
-| `GET` | `/api/v1/tasks` | 分頁查詢任務清單（可按類型過濾） |
+| `GET` | `/api/v1/tasks` | 分頁查詢任務清單（可按類型過濾，進行中的任務優先展示） |
+| `POST` | `/api/v1/tasks/batch-delete` | 批次刪除任務記錄（body 傳 `ids`，可選 `delete_files` 同時刪除輸出檔案） |
 | `POST` | `/api/v1/tasks/:id/retry` | 重試失敗任務 |
-| `DELETE` | `/api/v1/tasks/:id` | 刪除任務 |
+| `DELETE` | `/api/v1/tasks/:id` | 刪除任務（可選 `?delete_files=true` 同時刪除輸出檔案） |
 
-任務狀態：`pending`（待處理）-> `running`（執行中）-> `completed`（已完成）/ `failed`（失敗）
+任務狀態：`pending`（待處理）-> `running`（執行中）-> `completed`（已完成）/ `failed`（失敗）/ `cancelled`（已取消）
+
+> **任務狀態以影片記錄為準**：影片頁的任務狀態欄直接讀取影片記錄中的任務狀態欄位（`subtitle_status` / `subtitle_burn_status` / `deblur_status` / `upscale_status`），由任務生命週期即時同步（建立→待處理、認領→執行中、完成→已完成、失敗→失敗、取消→已取消、刪除任務→回退/清空）。刪除任務記錄時可勾選同時刪除對應輸出檔案。
 
 > **清晰度增強任務參數**：建立時需指定目標解析度（`target_width` / `target_height`），處理器（`upscale_processor`：`realesrgan` / `realcugan` / `libplacebo`）、模型（`upscale_model`）與降噪等級（`upscale_noise_level`，-1 ~ 3）可按需設定。
 
@@ -383,6 +404,7 @@ videoFlow/
 ## 🛡️ 注意事項
 
 - **FFmpeg 必需**：`ffmpeg.provider` 固定為 `local`，映像已內建 ffmpeg；本地原始碼執行需自行安裝
+- **任務輸出需要可寫目錄**：Docker 部署時務必掛載可寫的輸出目錄（如 `/output`）並設定 `output.dir`；未設定時產物會寫到影片所在目錄旁的子目錄，輸入目錄為唯讀掛載時將寫失敗
 - **去馬賽克 / 清晰度增強需 Docker**：容器部署時需掛載宿主機 Docker socket；不用該功能可忽略，不影響服務啟動
 - **首次使用需初始化**：瀏覽器首次存取會引導初始化管理員帳號，登入後才能使用業務功能
 - **ASR 服務需自備**：請自行部署 [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice)，並設定 `asr.url`

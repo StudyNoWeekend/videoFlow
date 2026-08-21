@@ -3,6 +3,7 @@ package res
 // SettingRes 统一设置响应
 type SettingRes struct {
 	VideoDir                string `json:"video_dir"`
+	OutputDir               string `json:"output_dir"`
 	ScanInterval            int    `json:"scan_interval"`
 	ASRURL                  string `json:"asr_url"`
 	ASRLanguage             string `json:"asr_language"`

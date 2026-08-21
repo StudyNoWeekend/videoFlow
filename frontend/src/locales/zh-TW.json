@@ -65,6 +65,8 @@
 	  "videos.source.tip": "該影片存在同名衍生影片，請選擇要對哪條影片執行去馬賽克：",
 	  "videos.source.subtitle_burn_tip": "該影片存在同名衍生影片，請選擇要對哪條影片寫入字幕：",
 		  "videos.source.original_video": "原影片（預設）",
+		  "videos.source.overwrite_label": "覆寫所選影片（{name}）",
+		  "videos.source.overwrite_tip": "勾選後，任務結果將直接取代您選擇的影片檔案，不會產生新檔案",
 		"videos.upscale.source_label": "選擇來源影片",
 		"videos.upscale.target_label": "目標清晰度",
 		"videos.upscale.processor_label": "清晰度修復處理器",
@@ -72,6 +74,8 @@
 	"videos.upscale.noise_label": "降噪等級",
 		"videos.upscale.select_source": "請先選擇來源影片",
 		  "videos.upscale.no_target": "來源影片解析度已達最高級別，無合適放大目標",
+		  "videos.upscale.overwrite_label": "覆寫所選影片（{name}）",
+		  "videos.upscale.overwrite_tip": "勾選後，清晰度修復結果將直接取代您選擇的影片檔案，不會產生新檔案",
 
   "tasks.title": "任務監控台",
   "tasks.cancel.confirm": "確定取消該任務嗎？",

@@ -34,10 +34,13 @@ const (
 // Task 字幕/去马赛克任务数据模型
 type Task struct {
 	BaseModel
-	VideoID           string `gorm:"type:char(36);not null;index:idx_task_video_id;comment:关联视频ID" json:"video_id"`
-	TaskType          string `gorm:"type:varchar(32);not null;default:'subtitle';index:idx_task_task_type;comment:任务类型 subtitle/subtitle_burn/deblur/upscale" json:"task_type"`
-	Status            string `gorm:"type:varchar(32);not null;default:'pending';index:idx_task_status;comment:任务状态 pending/running/completed/failed" json:"status"`
-	SourcePath        string `gorm:"type:varchar(1024);not null;default:'';comment:实际处理源文件路径，为空时使用关联视频路径" json:"source_path"`
+	VideoID    string `gorm:"type:char(36);not null;index:idx_task_video_id;comment:关联视频ID" json:"video_id"`
+	TaskType   string `gorm:"type:varchar(32);not null;default:'subtitle';index:idx_task_task_type;comment:任务类型 subtitle/subtitle_burn/deblur/upscale" json:"task_type"`
+	Status     string `gorm:"type:varchar(32);not null;default:'pending';index:idx_task_status;comment:任务状态 pending/running/completed/failed" json:"status"`
+	SourcePath string `gorm:"type:varchar(1024);not null;default:'';comment:实际处理源文件路径，为空时使用关联视频路径" json:"source_path"`
+	// Overwrite 覆盖处理源文件：仅当选择了衍生视频（SourcePath 非空且非原视频）时有效，
+	// 任务输出直接替换处理源文件本身，不再生成新的输出文件
+	Overwrite         bool   `gorm:"default:false;comment:是否覆盖处理源文件（仅衍生视频有效）" json:"overwrite"`
 	TargetWidth       int    `gorm:"default:0;comment:清晰度修复目标宽度（像素）" json:"target_width"`
 	TargetHeight      int    `gorm:"default:0;comment:清晰度修复目标高度（像素）" json:"target_height"`
 	Progress          int    `gorm:"default:0;comment:进度 0-100" json:"progress"`
@@ -188,7 +191,8 @@ func TaskList(ctx context.Context, query *TaskListQuery) ([]*TaskWithVideo, int6
 
 	offset := (page - 1) * pageSize
 	var list []*TaskWithVideo
-	if err := db.Order("tasks.created_at DESC, tasks.id DESC").Offset(offset).Limit(pageSize).Scan(&list).Error; err != nil {
+	// 进行中的任务（running/pending/cancelling）优先，同状态内按创建时间倒序（最新在前）
+	if err := db.Order("CASE WHEN tasks.status IN ('running','pending','cancelling') THEN 0 ELSE 1 END, tasks.created_at DESC, tasks.id DESC").Offset(offset).Limit(pageSize).Scan(&list).Error; err != nil {
 		return nil, 0, fmt.Errorf("查询任务列表失败: %w", err)
 	}
 	return list, total, nil
@@ -270,6 +274,18 @@ func TaskCountByStatusTx(tx *gorm.DB, status, taskType string) (int64, error) {
 // TaskDelete 根据 ID 删除任务记录（软删除）
 func TaskDelete(ctx context.Context, id string) error {
 	result := DB.WithContext(ctx).Delete(&Task{}, "id = ?", id)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
+// TaskDeleteTx 在事务中根据 ID 删除任务记录（软删除）
+func TaskDeleteTx(tx *gorm.DB, id string) error {
+	result := tx.Delete(&Task{}, "id = ?", id)
 	if result.Error != nil {
 		return result.Error
 	}

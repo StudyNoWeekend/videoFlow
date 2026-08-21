@@ -62,12 +62,12 @@
 
 ## ✨ 功能特性
 
-- **视频目录扫描** - 手动扫描或后台定时自动扫描，视频自动入库，卡片式分页展示
+- **输入 / 输出目录分离** - 扫描输入目录自动入库；任务产物（字幕 / 烧录视频 / 去马赛克 / 清晰度修复视频）统一输出到可配置的输出目录，任务状态以视频记录的状态字段为准、由任务生命周期实时同步
 - **字幕生成** - 基于 Whisper ASR，支持语言、VAD 过滤、任务类型、音频预编码、初始提示词、词级时间戳、多种输出格式（json / srt / vtt / txt / tsv）
 - **去马赛克** - 基于 Docker 镜像 `ladaapp/lada`，支持 x86_64 CPU 以及 NVIDIA CUDA 显卡（Turing 系列或更高版本，包括 RTX 20xx 到 RTX 50xx 系列），CUDA 设备自动透传（`--gpus`）、GPU 故障原因自动提示
 - **清晰度增强** - 基于 Video2X（`ghcr.io/k4yt3x/video2x:latest`）将视频升级到更高分辨率，支持 Real-ESRGAN / Real-CUGAN / libplacebo 处理器，目标分辨率与降噪等级按任务指定
-- **任务管理** - 创建 / 查询 / 删除 / 失败重试，按类型过滤，实时进度条，前端 2 秒轮询刷新
-- **任务调度器** - 后台调度器按配置的并发数限制执行字幕 / 去马赛克 / 清晰度增强任务，轮询间隔可在线配置
+- **任务管理** - 创建 / 查询 / 删除（支持多选批量删除，可勾选同时删除输出文件）/ 失败重试，按类型过滤，实时进度条，前端 2 秒轮询刷新；进行中的任务优先展示，同状态下最新创建的在前
+- **任务调度器** - 后台调度器按配置的并发数限制执行字幕 / 去马赛克 / 清晰度增强任务，轮询间隔可在线配置，取消任务自动清理遗留的半成品输出文件
 - **用户认证** - 首次启动引导初始化管理员账号，登录 / 修改密码 / 密码重置，业务 API 全部走 JWT 鉴权
 - **运行时配置** - 统一配置页，所有配置在线修改并持久化（SQLite），保存即热生效
 - **FFmpeg 智能调用** - 自动探测本地 ffmpeg，无需手动配置
@@ -85,7 +85,7 @@ docker pull ghcr.io/studynoweekend/videoflow:latest
 
 **重要：挂载说明**
 
-VideoFlow 部署在 Docker 容器内，但需要操作**宿主机**的 Docker daemon（用于安装/检测 Whisper ASR、Lada 等组件），因此必须挂载 Docker 套接字。同时视频目录也需要通过 volume 挂载到容器内。
+VideoFlow 部署在 Docker 容器内，但需要操作**宿主机**的 Docker daemon（用于安装/检测 Whisper ASR、Lada 等组件），因此必须挂载 Docker 套接字。同时视频目录需要通过 volume 挂载到容器内（只读即可），任务输出目录也需要挂载（可写，任务产物统一输出到这里）。
 
 推荐使用 `docker-compose`（配置文件见项目根目录 `docker-compose.yml`）：
 
@@ -115,10 +115,14 @@ docker run -d --name videoflow \
   # 视频目录（必需：将宿主机视频目录映射到容器内路径，
   # 然后在 VideoFlow 设置页中配置对应容器内路径）
   -v /宿主机/视频/目录:/videos:ro \
+  # 任务输出目录（必需：可写，任务产物统一输出到这里）
+  -v /宿主机/输出/目录:/output \
   # 日志目录（可选）
   -v "$PWD/logs:/app/logs" \
   # 视频目录配置（覆盖 config.yaml 中的 video.dir）
   -e APP_VIDEO_DIR=/videos \
+  # 任务输出目录配置（覆盖 config.yaml 中的 output.dir）
+  -e APP_OUTPUT_DIR=/output \
   ghcr.io/studynoweekend/videoflow:latest
 ```
 
@@ -149,7 +153,9 @@ docker run -d --name videoflow \
   -v "$PWD/data:/app/data" \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v /宿主机/视频/目录:/videos:ro \
+  -v /宿主机/输出/目录:/output \
   -e APP_VIDEO_DIR=/videos \
+  -e APP_OUTPUT_DIR=/output \
   video-captions:latest
 ```
 
@@ -185,7 +191,7 @@ APP_HTTP_PORT=9090 go run ./cmd/api   # 后端
 ## 🎬 使用流程
 
 1. 启动服务，浏览器访问前端地址；首次使用先初始化管理员账号并登录
-2. 在「设置」页配置本地视频目录与 ASR 服务地址，保存
+2. 在「设置」页配置本地视频目录（输入）、任务输出目录与 ASR 服务地址，保存
 3. 在「视频列表」页点击扫描，视频自动入库
 4. 点视频卡片上的「生成字幕」，创建字幕任务
 5. 在「任务管理」页查看实时进度（2 秒自动刷新）
@@ -233,6 +239,9 @@ database:
   dsn: data/app.db
 video:
   dir: ""
+output:
+  # 任务输出目录（可选，留空时任务产物输出到原视频所在目录旁的子目录）
+  dir: ""
 scan:
   interval: 60
 asr:
@@ -263,6 +272,7 @@ viper 前缀 `APP_`，配置键 `.` -> `_`，故 `http.port` 对应环境变量 
 | --- | --- | --- |
 | `APP_HTTP_PORT` | `http.port` | `8080` |
 | `APP_VIDEO_DIR` | `video.dir` | `""` |
+| `APP_OUTPUT_DIR` | `output.dir` | `""` |
 | `APP_SCAN_INTERVAL` | `scan.interval` | `60` |
 | `APP_ASR_URL` | `asr.url` | `http://127.0.0.1:9999/asr` |
 | `APP_ASR_LANGUAGE` | `asr.language` | `zh` |
@@ -280,11 +290,14 @@ viper 前缀 `APP_`，配置键 `.` -> `_`，故 `http.port` 对应环境变量 
 | `/app/data` | SQLite 数据库持久化（`data/app.db`） | ✅ 必需 |
 | `/var/run/docker.sock` | 宿主机 Docker 套接字，用于组件安装/检测/去马赛克/清晰度增强 | ✅ 必需 |
 | `/<容器内视频目录>` | 将宿主机视频目录挂载到容器内（如 `/videos`），然后在配置中将 `video.dir` 设为该路径 | ✅ 必需 |
+| `/<容器内输出目录>` | 任务输出目录（如 `/output`，**必须可写**），然后在配置中将 `output.dir` 设为该路径 | ✅ 必需（Docker 部署） |
 | `/app/logs` | 日志输出 | 可选 |
 
 > **为什么必须挂载 `/var/run/docker.sock`？** VideoFlow 运行在容器内，但它需要操作宿主机上的 Docker daemon——安装/检测 Whisper ASR 容器、拉取 Lada / Video2X 镜像、执行去马赛克 / 清晰度增强 `docker run` 等，全部通过挂载的 Docker 套接字调用宿主机 Docker 实现。如果不挂载，组件管理页面会显示 Docker 不可用，去马赛克和清晰度增强功能也无法使用。
 
 > **视频目录挂载说明：** 宿主机视频目录通过 volume 挂载到容器内路径（如 `/videos`），然后在 VideoFlow 设置页中配置 `video.dir` 为该容器内路径。容器内的 Go 代码通过 `os.Stat` / `filepath.WalkDir` 访问已挂载的路径，无需额外配置。
+
+> **输出目录挂载说明：** 任务产物（srt / 烧录视频 / 去马赛克 / 清晰度修复视频）统一输出到设置页配置的 `output.dir` 容器内路径（如 `/output`），该路径必须为可写挂载；输入目录是只读挂载，产物不能写到输入目录。视频在输入目录的子文件夹时，输出会镜像该相对结构（如 `output/<子目录>/<视频名>/`）。
 
 </details>
 
@@ -337,6 +350,7 @@ viper 前缀 `APP_`，配置键 `.` -> `_`，故 `http.port` 对应环境变量 
 | --- | --- | --- |
 | `POST` | `/api/v1/videos/scan` | 扫描视频目录入库 |
 | `GET` | `/api/v1/videos` | 分页查询视频列表 |
+| `POST` | `/api/v1/videos/batch-delete` | 批量删除视频记录（body 传 `ids`，可选 `delete_files` 同时删除输出目录） |
 | `PUT` | `/api/v1/videos/:id` | 更新视频信息 |
 | `DELETE` | `/api/v1/videos/:id` | 删除视频记录 |
 
@@ -348,11 +362,14 @@ viper 前缀 `APP_`，配置键 `.` -> `_`，故 `http.port` 对应环境变量 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | `POST` | `/api/v1/tasks` | 创建任务（字幕 / 字幕烧录 / 去马赛克 / 清晰度增强） |
-| `GET` | `/api/v1/tasks` | 分页查询任务列表（可按类型过滤） |
+| `GET` | `/api/v1/tasks` | 分页查询任务列表（可按类型过滤，进行中的任务优先展示） |
+| `POST` | `/api/v1/tasks/batch-delete` | 批量删除任务记录（body 传 `ids`，可选 `delete_files` 同时删除输出文件） |
 | `POST` | `/api/v1/tasks/:id/retry` | 重试失败任务 |
-| `DELETE` | `/api/v1/tasks/:id` | 删除任务 |
+| `DELETE` | `/api/v1/tasks/:id` | 删除任务（可选 `?delete_files=true` 同时删除输出文件） |
 
-任务状态：`pending`（待处理）-> `running`（进行中）-> `completed`（已完成）/ `failed`（失败）
+任务状态：`pending`（待处理）-> `running`（进行中）-> `completed`（已完成）/ `failed`（失败）/ `cancelled`（已取消）
+
+> **任务状态以视频记录为准**：视频页的任务状态列直接读取视频记录中的任务状态字段（`subtitle_status` / `subtitle_burn_status` / `deblur_status` / `upscale_status`），由任务生命周期实时同步（创建→待处理、认领→进行中、完成→已完成、失败→失败、取消→已取消、删除任务→回退/清空）。删除任务记录可勾选同时删除对应输出文件。
 
 > **清晰度增强任务参数**：创建时需指定目标分辨率（`target_width` / `target_height`），处理器（`upscale_processor`：`realesrgan` / `realcugan` / `libplacebo`）、模型（`upscale_model`）与降噪等级（`upscale_noise_level`，-1 ~ 3）可按需设置。
 
@@ -416,6 +433,7 @@ videoFlow/
 ## 🛡️ 注意事项
 
 - **FFmpeg 必需**：`ffmpeg.provider` 固定为 `local`，镜像已内置 ffmpeg；本地源码运行需自行安装
+- **任务输出需要可写目录**：Docker 部署时务必挂载可写的输出目录（如 `/output`）并配置 `output.dir`；未配置时产物会写到视频所在目录旁的子目录，输入目录为只读挂载时将写失败
 - **去马赛克 / 清晰度增强需 Docker**：容器部署时需挂载宿主机 Docker socket；不用该功能可忽略，不影响服务启动
 - **首次使用需初始化**：浏览器首次访问会引导初始化管理员账号，登录后才能使用业务功能
 - **ASR 服务需自备**：请自行部署 [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice)，并配置 `asr.url`

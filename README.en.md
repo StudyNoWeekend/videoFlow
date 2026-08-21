@@ -55,12 +55,12 @@ Under the hood it reuses the recognition power of [Whisper ASR Webservice](https
 
 ## ✨ Features
 
-- **Video directory scanning** - Manual scan or background scheduled auto-scan, videos auto-imported, paginated card display
+- **Separate input / output directories** - Scans the input directory and imports videos automatically; task artifacts (subtitles / burned videos / deblurred / upscaled videos) are output to a configurable output directory, and task status is tracked in the video record, kept in sync by the task lifecycle
 - **Subtitle generation** - Based on Whisper ASR, supports language, VAD filter, task type, audio pre-encoding, initial prompt, word-level timestamps, and multiple output formats (json / srt / vtt / txt / tsv)
 - **Deblur** - Based on the `ladaapp/lada` Docker image, supports x86_64 CPU and NVIDIA CUDA GPUs (Turing series or higher, RTX 20xx to RTX 50xx). CUDA devices are passed through automatically (`--gpus`), with auto hints on GPU failure causes
 - **Video upscaling** - Uses Video2X (`ghcr.io/k4yt3x/video2x:latest`) to upgrade videos to a higher resolution, with Real-ESRGAN / Real-CUGAN / libplacebo processors; target resolution and denoise level are set per task
-- **Task management** - Create / query / delete / retry-on-failure, filter by type, real-time progress bar, 2-second polling refresh on the frontend
-- **Task scheduler** - A background scheduler runs subtitle / deblur / upscale tasks within configured concurrency limits; the polling interval is online-configurable
+- **Task management** - Create / query / delete (multi-select batch delete, with an option to also delete the output files) / retry-on-failure, filter by type, real-time progress bar, 2-second polling refresh on the frontend; running tasks are shown first, newest-created first within the same status
+- **Task scheduler** - A background scheduler runs subtitle / deblur / upscale tasks within configured concurrency limits; the polling interval is online-configurable, and cancelling a task automatically cleans up leftover half-written output files
 - **User authentication** - First-run admin account initialization guide, login / change password / password reset; all business APIs are protected by JWT auth
 - **Runtime configuration** - Unified settings page, all config editable online and persisted (SQLite), hot-reload on save
 - **Smart FFmpeg invocation** - Automatically detects local ffmpeg, no manual configuration needed
@@ -93,6 +93,11 @@ docker run -d --name videoflow \
   -v "$PWD/config.yaml:/app/config/config.yaml:ro" \
   -v "$PWD/data:/app/data" \
   -v "$PWD/logs:/app/logs" \
+  # Input video dir (read-only) and task output dir (writable), then configure the container paths in the Settings page
+  -v /path/to/videos:/videos:ro \
+  -v /path/to/output:/output \
+  -e APP_VIDEO_DIR=/videos \
+  -e APP_OUTPUT_DIR=/output \
   ghcr.io/studynoweekend/videoflow:latest
 ```
 
@@ -110,6 +115,10 @@ docker run -d --name videoflow \
   -e APP_HTTP_PORT=9090 -p 9090:9090 \
   -v "$PWD/config.yaml:/app/config/config.yaml:ro" \
   -v "$PWD/data:/app/data" \
+  -v /path/to/videos:/videos:ro \
+  -v /path/to/output:/output \
+  -e APP_VIDEO_DIR=/videos \
+  -e APP_OUTPUT_DIR=/output \
   ghcr.io/studynoweekend/videoflow:latest
 ```
 
@@ -122,6 +131,10 @@ docker run -d --name videoflow \
   -e APP_HTTP_PORT=8080 -p 8080:8080 \
   -v "$PWD/config.yaml:/app/config/config.yaml:ro" \
   -v "$PWD/data:/app/data" \
+  -v /path/to/videos:/videos:ro \
+  -v /path/to/output:/output \
+  -e APP_VIDEO_DIR=/videos \
+  -e APP_OUTPUT_DIR=/output \
   video-captions:latest
 ```
 
@@ -157,7 +170,7 @@ Open the local address Vite prints in your browser.
 ## 🎬 Usage Workflow
 
 1. Start the service and open the frontend address in your browser; on first use, initialize an admin account and log in
-2. On the "Settings" page, configure your local video directory and ASR service URL, then save
+2. On the "Settings" page, configure your local video directory (input), the task output directory, and the ASR service URL, then save
 3. On the "Video List" page, click scan to auto-import videos
 4. Click "Generate Subtitles" on a video card to create a subtitle task
 5. On the "Task Management" page, view real-time progress (auto-refreshes every 2 seconds)
@@ -205,6 +218,9 @@ database:
   dsn: data/app.db
 video:
   dir: ""
+output:
+  # Task output directory (optional; when empty, artifacts are written to a subdirectory next to the original video)
+  dir: ""
 scan:
   interval: 60
 asr:
@@ -235,6 +251,7 @@ Viper prefix `APP_`, config key `.` -> `_`, so `http.port` maps to the environme
 | --- | --- | --- |
 | `APP_HTTP_PORT` | `http.port` | `8080` |
 | `APP_VIDEO_DIR` | `video.dir` | `""` |
+| `APP_OUTPUT_DIR` | `output.dir` | `""` |
 | `APP_SCAN_INTERVAL` | `scan.interval` | `60` |
 | `APP_ASR_URL` | `asr.url` | `http://127.0.0.1:9999/asr` |
 | `APP_ASR_LANGUAGE` | `asr.language` | `zh` |
@@ -251,7 +268,11 @@ Viper prefix `APP_`, config key `.` -> `_`, so `http.port` maps to the environme
 | `/app/config/config.yaml` | Config file (read-only mount) |
 | `/app/data` | SQLite database persistence (`data/app.db`) |
 | `/app/logs` | Log output |
+| `/<container video dir>` | Mount the host video dir into the container (e.g. `/videos`, read-only), then set `video.dir` to it in the Settings page |
+| `/<container output dir>` | Task output directory (e.g. `/output`, **must be writable**), then set `output.dir` to it in the Settings page |
 | `/var/run/docker.sock` | (Optional) Deblur / upscaling requires mounting the host Docker socket |
+
+> **Output directory note:** Task artifacts (srt / burned videos / deblurred / upscaled videos) are all written to the `output.dir` container path (e.g. `/output`) configured in the Settings page; this mount must be writable. The input directory is mounted read-only, so artifacts cannot be written there. When a video lives in a subfolder of the input directory, the output mirrors that relative structure (e.g. `output/<subfolder>/<video name>/`).
 
 </details>
 
@@ -304,6 +325,7 @@ All endpoints share the `/api/v1` prefix. Response structure:
 | --- | --- | --- |
 | `POST` | `/api/v1/videos/scan` | Scan video directory and import |
 | `GET` | `/api/v1/videos` | Paginated video list query |
+| `POST` | `/api/v1/videos/batch-delete` | Batch delete video records (`ids` in body; optional `delete_files` to also delete the output directory) |
 | `PUT` | `/api/v1/videos/:id` | Update video info |
 | `DELETE` | `/api/v1/videos/:id` | Delete video record |
 
@@ -315,11 +337,14 @@ All endpoints share the `/api/v1` prefix. Response structure:
 | Method | Path | Description |
 | --- | --- | --- |
 | `POST` | `/api/v1/tasks` | Create a task (subtitle / subtitle burn-in / deblur / upscale) |
-| `GET` | `/api/v1/tasks` | Paginated task list query (filterable by type) |
+| `GET` | `/api/v1/tasks` | Paginated task list query (filterable by type; running tasks shown first) |
+| `POST` | `/api/v1/tasks/batch-delete` | Batch delete task records (`ids` in body; optional `delete_files` to also delete the output files) |
 | `POST` | `/api/v1/tasks/:id/retry` | Retry a failed task |
-| `DELETE` | `/api/v1/tasks/:id` | Delete a task |
+| `DELETE` | `/api/v1/tasks/:id` | Delete a task (optional `?delete_files=true` to also delete the output files) |
 
-Task status: `pending` -> `running` -> `completed` / `failed`
+Task status: `pending` -> `running` -> `completed` / `failed` / `cancelled`
+
+> **Task status comes from the video record**: The status column on the videos page reads the task status fields in the video record directly (`subtitle_status` / `subtitle_burn_status` / `deblur_status` / `upscale_status`), kept in sync by the task lifecycle (created → pending, claimed → running, done → completed, failed → failed, cancelled → cancelled, task deleted → rolled back / cleared). When deleting a task record you can optionally delete the corresponding output files at the same time.
 
 > **Upscale task parameters**: When creating one, specify the target resolution (`target_width` / `target_height`); the processor (`upscale_processor`: `realesrgan` / `realcugan` / `libplacebo`), model (`upscale_model`), and denoise level (`upscale_noise_level`, -1 ~ 3, for Real-ESRGAN / Real-CUGAN) can be set as needed.
 
@@ -383,6 +408,7 @@ videoFlow/
 ## 🛡️ Notes
 
 - **FFmpeg required**: `ffmpeg.provider` is fixed to `local`; the Docker image has ffmpeg built in. When running from source, install it yourself.
+- **Task output needs a writable directory**: When deploying with Docker, be sure to mount a writable output directory (e.g. `/output`) and configure `output.dir`. Without it, artifacts are written to a subdirectory next to the video, which fails if the input directory is mounted read-only.
 - **Deblur / upscaling need Docker**: When deploying in a container, mount the host Docker socket. If you don't use these features, you can ignore them—they won't affect service startup.
 - **Initialize on first use**: The first browser visit guides you through initializing an admin account; you must log in to use the business features.
 - **Bring your own ASR service**: Deploy [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice) yourself and configure `asr.url`.

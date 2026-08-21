@@ -65,6 +65,8 @@
 		  "videos.source.tip": "该视频存在同名衍生视频，请选择要对哪条视频执行去马赛克：",
 		  "videos.source.subtitle_burn_tip": "该视频存在同名衍生视频，请选择要对哪条视频写入字幕：",
 		  "videos.source.original_video": "原视频（默认）",
+		  "videos.source.overwrite_label": "覆盖所选视频（{name}）",
+		  "videos.source.overwrite_tip": "勾选后，任务结果将直接替换你选择的视频文件，不再生成新文件",
 		  "videos.upscale.source_label": "选择源视频",
 		  "videos.upscale.target_label": "目标清晰度",
 		  "videos.upscale.processor_label": "清晰度修复处理器",
@@ -72,6 +74,8 @@
 		  "videos.upscale.noise_label": "降噪等级",
 		  "videos.upscale.select_source": "请先选择源视频",
 		  "videos.upscale.no_target": "源视频分辨率已达最高级别，无合适放大目标",
+		  "videos.upscale.overwrite_label": "覆盖所选视频（{name}）",
+		  "videos.upscale.overwrite_tip": "勾选后，清晰度修复结果将直接替换你选择的视频文件，不再生成新文件",
 
   "tasks.title": "任务监控台",
   "tasks.cancel.confirm": "确定取消该任务吗？",

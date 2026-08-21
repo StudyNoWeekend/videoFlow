@@ -14,6 +14,7 @@ func RegisterTaskRouter(rg *gin.RouterGroup) {
 	{
 		api.GET("", taskCtl.List)
 		api.POST("", taskCtl.Create)
+		api.POST("/batch-delete", taskCtl.BatchDelete)
 		api.POST("/:id/retry", taskCtl.Retry)
 		api.POST("/:id/cancel", taskCtl.Cancel)
 		api.DELETE("/:id", taskCtl.Delete)

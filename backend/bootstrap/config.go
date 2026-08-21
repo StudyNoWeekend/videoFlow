@@ -12,7 +12,7 @@ import (
 var Config *AppConfig
 
 // AppVersion 应用版本号
-const AppVersion = "v0.3.0"
+const AppVersion = "v0.3.1"
 
 // AppConfig 应用配置总入口
 type AppConfig struct {
@@ -24,6 +24,7 @@ type AppConfig struct {
 	Worker      AppConfigWorker      `mapstructure:"worker"`
 	FFmpeg      AppConfigFFmpeg      `mapstructure:"ffmpeg"`
 	Video       AppConfigVideo       `mapstructure:"video"`
+	Output      AppConfigOutput      `mapstructure:"output"`
 	Scan        AppConfigScan        `mapstructure:"scan"`
 	Repair      AppConfigRepair      `mapstructure:"repair"`
 	Upscale     AppConfigUpscale     `mapstructure:"upscale"`
@@ -94,6 +95,11 @@ type AppConfigFFmpeg struct {
 
 // AppConfigVideo 本地视频目录配置
 type AppConfigVideo struct {
+	Dir string `mapstructure:"dir"`
+}
+
+// AppConfigOutput 任务输出目录配置
+type AppConfigOutput struct {
 	Dir string `mapstructure:"dir"`
 }
 

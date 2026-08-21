@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"strconv"
+
 	"github.com/gin-gonic/gin"
 
 	"video-captions/enum"
@@ -72,8 +74,8 @@ func (ctl *TaskController) Retry(c *gin.Context) {
 	response.Success(c, res)
 }
 
-// Delete 删除任务
-// DELETE /api/v1/tasks/:id
+// Delete 删除任务，可选同时删除对应的输出文件（delete_files=true）
+// DELETE /api/v1/tasks/:id?delete_files=true
 func (ctl *TaskController) Delete(c *gin.Context) {
 	id := c.Param("id")
 	if id == "" {
@@ -81,11 +83,30 @@ func (ctl *TaskController) Delete(c *gin.Context) {
 		return
 	}
 
-	if err := ctl.taskLogic.DeleteTask(c.Request.Context(), id); err != nil {
+	deleteFiles, _ := strconv.ParseBool(c.DefaultQuery("delete_files", "false"))
+
+	if err := ctl.taskLogic.DeleteTask(c.Request.Context(), id, deleteFiles); err != nil {
 		HandleError(c, err)
 		return
 	}
 	response.Success(c, nil)
+}
+
+// BatchDelete 批量删除任务记录，运行中的任务跳过；可选同时删除对应的输出文件
+// POST /api/v1/tasks/batch-delete
+func (ctl *TaskController) BatchDelete(c *gin.Context) {
+	var deleteReq req.TaskBatchDeleteReq
+	if err := c.ShouldBindJSON(&deleteReq); err != nil {
+		response.FailByBizError(c, enum.ErrInvalidParam)
+		return
+	}
+
+	res, err := ctl.taskLogic.BatchDelete(c.Request.Context(), &deleteReq)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	response.Success(c, res)
 }
 
 // Cancel 取消任务

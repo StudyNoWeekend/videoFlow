@@ -20,6 +20,7 @@ import (
 	"video-captions/internal/ffmpeg"
 	"video-captions/internal/model"
 	"video-captions/internal/subtitle"
+	"video-captions/internal/upscale"
 	"video-captions/utils/logger"
 )
 
@@ -293,7 +294,105 @@ func (s *TaskScheduler) runTask(ctx context.Context, task *model.Task) {
 		return
 	}
 
-	s.processTask(taskCtx, task)
+	var out taskOutput
+	s.processTask(taskCtx, task, &out)
+
+	// 任务被取消后清理遗留输出文件，避免在输出目录留下半成品
+	var ended model.Task
+	if err := s.db.WithContext(dbCtx).Select("status").Where("id = ?", task.ID).First(&ended).Error; err == nil && ended.Status == model.TaskStatusCancelled {
+		s.cleanupCancelledOutput(&out)
+	}
+}
+
+// taskOutput 记录任务执行期间产生的输出文件，用于任务取消后的清理。
+// 确定性文件（如 srt、烧录/清晰度修复产物）直接记录路径；
+// 输出文件名不确定的任务（去马赛克由外部程序生成）则记录执行前输出目录快照，
+// 取消时删除本次执行新增的文件。
+type taskOutput struct {
+	produced []string
+	// snapshotDir / snapshotFiles：执行前输出目录快照（仅去马赛克等文件名不确定的任务使用）
+	snapshotDir   string
+	snapshotFiles map[string]struct{}
+}
+
+// recordProduced 记录任务确定性产出的文件路径
+func (o *taskOutput) recordProduced(path string) {
+	o.produced = append(o.produced, path)
+}
+
+// snapshotOutputDir 记录输出目录执行前的文件快照
+func (o *taskOutput) snapshotOutputDir(dir string) {
+	o.snapshotDir = dir
+	o.snapshotFiles = make(map[string]struct{})
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		o.snapshotFiles[e.Name()] = struct{}{}
+	}
+}
+
+// findNewOutputVideo 在执行完成后从输出目录中找出本次执行新产生的视频文件
+// （执行前快照之外的文件）。优先返回名字含 repaired 标识的文件（去马赛克产物），
+// 否则返回第一个新视频文件；未找到时返回空串。
+func findNewOutputVideo(dir string, snapshot map[string]struct{}) string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return ""
+	}
+	var fallback string
+	for _, e := range entries {
+		if _, existed := snapshot[e.Name()]; existed {
+			continue
+		}
+		if !model.IsVideoFile(e.Name()) {
+			continue
+		}
+		if strings.Contains(strings.ToLower(e.Name()), "repaired") {
+			return filepath.Join(dir, e.Name())
+		}
+		if fallback == "" {
+			fallback = filepath.Join(dir, e.Name())
+		}
+	}
+	return fallback
+}
+
+// cleanupCancelledOutput 清理任务取消后遗留的输出文件，删除失败仅记录日志不阻断
+func (s *TaskScheduler) cleanupCancelledOutput(out *taskOutput) {
+	for _, path := range out.produced {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			logger.Logger.Warn("清理任务取消遗留文件失败",
+				zap.String("path", path),
+				zap.Error(err),
+			)
+		} else if err == nil {
+			logger.Logger.Info("已清理任务取消遗留文件", zap.String("path", path))
+		}
+	}
+
+	if out.snapshotDir == "" {
+		return
+	}
+	entries, err := os.ReadDir(out.snapshotDir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if _, existed := out.snapshotFiles[e.Name()]; existed {
+			continue
+		}
+		path := filepath.Join(out.snapshotDir, e.Name())
+		if err := os.RemoveAll(path); err != nil {
+			logger.Logger.Warn("清理任务取消遗留文件失败",
+				zap.String("path", path),
+				zap.Error(err),
+			)
+		} else {
+			logger.Logger.Info("已清理任务取消遗留文件", zap.String("path", path))
+		}
+	}
 }
 
 // registerCancel 注册运行中任务的取消函数
@@ -342,6 +441,13 @@ func (s *TaskScheduler) CancelByID(ctx context.Context, taskID string) error {
 	}
 	if res.RowsAffected > 0 {
 		logger.Logger.Info("等待中的任务已取消", zap.String("task_id", taskID))
+		// 等待中的任务被直接落定为已取消，同步视频对应任务类型的状态字段
+		var t model.Task
+		if err := s.db.WithContext(dbCtx).Select("video_id", "task_type").Where("id = ?", taskID).First(&t).Error; err == nil {
+			if err := model.VideoSetTaskStatusTx(s.db.WithContext(dbCtx), t.VideoID, t.TaskType, model.TaskStatusCancelled); err != nil {
+				logger.Logger.Error("同步视频任务状态失败", zap.String("task_id", taskID), zap.Error(err))
+			}
+		}
 		return nil
 	}
 
@@ -413,7 +519,11 @@ func (s *TaskScheduler) dispatchPendingByType(taskType string, limit int32) {
 		err := s.db.WithContext(s.ctx).Transaction(func(tx *gorm.DB) error {
 			var e error
 			task, e = model.TaskClaimPendingTx(tx, taskType)
-			return e
+			if e != nil || task == nil {
+				return e
+			}
+			// 任务进入 running，同步视频对应任务类型状态字段
+			return model.VideoSetTaskStatusTx(tx, task.VideoID, task.TaskType, model.TaskStatusRunning)
 		})
 		if err != nil {
 			logger.Logger.Error("认领 pending 任务失败", zap.String("task_type", taskType), zap.Error(err))
@@ -431,13 +541,16 @@ func (s *TaskScheduler) dispatchPendingByType(taskType string, limit int32) {
 				logger.Logger.Error("任务回退失败", zap.String("task_id", task.ID), zap.Error(err))
 				return
 			}
+			if err := model.VideoSetTaskStatusTx(s.db.WithContext(s.ctx), task.VideoID, task.TaskType, model.TaskStatusPending); err != nil {
+				logger.Logger.Error("回退视频任务状态失败", zap.String("task_id", task.ID), zap.Error(err))
+			}
 			return
 		}
 	}
 }
 
 // processTask 根据任务类型分发到对应的执行逻辑
-func (s *TaskScheduler) processTask(ctx context.Context, task *model.Task) {
+func (s *TaskScheduler) processTask(ctx context.Context, task *model.Task, out *taskOutput) {
 	logger.Logger.Info("开始执行任务",
 		zap.String("task_id", task.ID),
 		zap.String("task_type", task.TaskType),
@@ -458,25 +571,20 @@ func (s *TaskScheduler) processTask(ctx context.Context, task *model.Task) {
 
 	switch task.TaskType {
 	case model.TaskTypeSubtitle:
-		s.processSubtitleTask(ctx, task)
+		s.processSubtitleTask(ctx, task, out)
 	case model.TaskTypeSubtitleBurn:
-		s.processSubtitleBurnTask(ctx, task)
+		s.processSubtitleBurnTask(ctx, task, out)
 	case model.TaskTypeDeblur, model.TaskTypeRepair:
-		s.processRepairTask(ctx, task)
+		s.processRepairTask(ctx, task, out)
 	case model.TaskTypeUpscale:
-		s.processUpscaleTask(ctx, task)
+		s.processUpscaleTask(ctx, task, out)
 	default:
 		s.markFailed(ctx, task, fmt.Errorf("未知的任务类型: %s", task.TaskType))
 	}
 }
 
 // processSubtitleTask 执行字幕生成任务：提取音频 -> ASR -> 保存 SRT 文件
-func (s *TaskScheduler) processSubtitleTask(ctx context.Context, task *model.Task) {
-	if bootstrap.ASRProvider == nil {
-		s.markFailed(ctx, task, fmt.Errorf("ASR Provider 未初始化"))
-		return
-	}
-
+func (s *TaskScheduler) processSubtitleTask(ctx context.Context, task *model.Task, out *taskOutput) {
 	// 更新进度：任务启动
 	s.updateProgress(ctx, task.ID, 10, "任务已启动，正在准备")
 
@@ -506,72 +614,84 @@ func (s *TaskScheduler) processSubtitleTask(ctx context.Context, task *model.Tas
 	}
 	s.updateProgress(ctx, task.ID, 30, "正在获取视频时长")
 
-	// 2. 提取音频到临时目录
-	tempDir, err := os.MkdirTemp("", "videoFlow-audio-*")
-	if err != nil {
-		s.markFailed(ctx, task, fmt.Errorf("创建音频临时目录失败: %w", err))
-		return
-	}
-	defer os.RemoveAll(tempDir)
-
-	audioPath, err := ffmpeg.ExtractAudio(ctx, video.Path, tempDir)
-	if err != nil {
-		s.markFailed(ctx, task, fmt.Errorf("提取音频失败: %w", err))
-		return
-	}
-	s.updateProgress(ctx, task.ID, 60, "音频提取完成，正在识别语音内容")
-
-	// 3. 调用 ASR 转录（同步接口，执行时间随文件大小而定，不设超时，无限等待）
-	segments, err := bootstrap.ASRProvider.Transcribe(ctx, audioPath)
-	if err != nil {
-		s.markFailed(ctx, task, fmt.Errorf("ASR 转录失败: %w", err))
-		return
-	}
-	s.updateProgress(ctx, task.ID, 90, "语音识别完成，正在生成字幕文件")
-
-	// 4. 保存字幕结果到数据库
-	resultJSON, err := json.Marshal(segments)
-	if err != nil {
-		s.markFailed(ctx, task, fmt.Errorf("序列化字幕结果失败: %w", err))
-		return
-	}
-
-	// 5. 将字幕写入 SRT 文件，保存到视频同名输出目录
-	subSegs := make([]subtitle.Segment, len(segments))
-	for i, seg := range segments {
-		subSegs[i] = subtitle.Segment{Start: seg.Start, End: seg.End, Text: seg.Text}
-	}
-	srtContent := subtitle.ToSRT(subSegs)
-	videoDir := filepath.Dir(video.Path)
-	videoBase := filepath.Base(video.Path)
-	videoExt := filepath.Ext(videoBase)
-	baseName := strings.TrimSuffix(videoBase, videoExt)
-	outputDir := filepath.Join(videoDir, baseName)
+	// 2. 生成字幕文件（提取音频 -> ASR -> 写 SRT）
+	outputDir := model.VideoOutputDir(ctx, video)
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
 		s.markFailed(ctx, task, fmt.Errorf("创建输出目录失败: %w", err))
 		return
 	}
-	srtFilePath := filepath.Join(outputDir, baseName+".srt")
+	srtFilePath := filepath.Join(outputDir, model.VideoBaseName(video)+".srt")
+	out.recordProduced(srtFilePath)
 
-	if err := os.WriteFile(srtFilePath, []byte(srtContent), 0644); err != nil {
-		s.markFailed(ctx, task, fmt.Errorf("写入 SRT 文件失败: %w", err))
+	resultJSON, err := s.generateSubtitleFile(ctx, video, srtFilePath, func(progress int, msg string) {
+		s.updateProgress(ctx, task.ID, progress, msg)
+	})
+	if err != nil {
+		s.markFailed(ctx, task, err)
 		return
 	}
+	s.updateProgress(ctx, task.ID, 95, "字幕文件生成完成")
 	logger.Logger.Info("字幕文件已保存",
 		zap.String("task_id", task.ID),
 		zap.String("srt_file", srtFilePath),
 	)
 
-	s.markCompleted(ctx, task.ID, string(resultJSON), "字幕生成完成")
+	s.markCompleted(ctx, task.ID, resultJSON, "字幕生成完成")
 	logger.Logger.Info("字幕任务执行完成",
 		zap.String("task_id", task.ID),
-		zap.String("audio_path", filepath.Base(audioPath)),
 		zap.String("srt_file", srtFilePath),
 	)
 }
 
-// processSubtitleBurnTask 执行字幕写入视频任务：查找 SRT 文件 -> ffmpeg 烧录
-func (s *TaskScheduler) processSubtitleBurnTask(ctx context.Context, task *model.Task) {
+// generateSubtitleFile 提取音频并通过 ASR 转录，将 SRT 字幕写入 srtFilePath。
+// onProgress 用于上报阶段进度；返回 ASR 结果 JSON，供字幕任务存入任务记录。
+// 被字幕生成任务与字幕烧录任务（未检测到字幕文件时自动生成）共用。
+func (s *TaskScheduler) generateSubtitleFile(ctx context.Context, video *model.Video, srtFilePath string, onProgress func(progress int, msg string)) (string, error) {
+	if bootstrap.ASRProvider == nil {
+		return "", fmt.Errorf("ASR Provider 未初始化")
+	}
+
+	// 提取音频到临时目录
+	tempDir, err := os.MkdirTemp("", "videoFlow-audio-*")
+	if err != nil {
+		return "", fmt.Errorf("创建音频临时目录失败: %w", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	onProgress(40, "正在提取音频")
+	audioPath, err := ffmpeg.ExtractAudio(ctx, video.Path, tempDir)
+	if err != nil {
+		return "", fmt.Errorf("提取音频失败: %w", err)
+	}
+	onProgress(60, "音频提取完成，正在识别语音内容")
+
+	// 调用 ASR 转录（同步接口，执行时间随文件大小而定，不设超时，无限等待）
+	segments, err := bootstrap.ASRProvider.Transcribe(ctx, audioPath)
+	if err != nil {
+		return "", fmt.Errorf("ASR 转录失败: %w", err)
+	}
+	onProgress(90, "语音识别完成，正在生成字幕文件")
+
+	// 序列化 ASR 结果
+	resultJSON, err := json.Marshal(segments)
+	if err != nil {
+		return "", fmt.Errorf("序列化字幕结果失败: %w", err)
+	}
+
+	// 将字幕写入 SRT 文件
+	subSegs := make([]subtitle.Segment, len(segments))
+	for i, seg := range segments {
+		subSegs[i] = subtitle.Segment{Start: seg.Start, End: seg.End, Text: seg.Text}
+	}
+	srtContent := subtitle.ToSRT(subSegs)
+	if err := os.WriteFile(srtFilePath, []byte(srtContent), 0644); err != nil {
+		return "", fmt.Errorf("写入 SRT 文件失败: %w", err)
+	}
+	return string(resultJSON), nil
+}
+
+// processSubtitleBurnTask 执行字幕写入视频任务：未生成过字幕时先自动生成，再 ffmpeg 烧录
+func (s *TaskScheduler) processSubtitleBurnTask(ctx context.Context, task *model.Task, out *taskOutput) {
 	// 更新进度：任务启动
 	s.updateProgress(ctx, task.ID, 10, "任务已启动，正在准备")
 
@@ -587,38 +707,61 @@ func (s *TaskScheduler) processSubtitleBurnTask(ctx context.Context, task *model
 	}
 	s.updateProgress(ctx, task.ID, 20, "正在获取视频信息")
 
-	// 2. 查找最近已完成字幕任务的 SRT 文件
-	subtitleTask, err := model.TaskGetLatestByVideoIDAndType(ctx, task.VideoID, model.TaskTypeSubtitle)
-	if err != nil {
-		s.markFailed(ctx, task, fmt.Errorf("获取字幕任务失败: %w", err))
-		return
-	}
-	if subtitleTask == nil {
-		s.markFailed(ctx, task, fmt.Errorf("未找到对应的字幕任务"))
-		return
-	}
-	if subtitleTask.Status != model.TaskStatusCompleted {
-		s.markFailed(ctx, task, fmt.Errorf("字幕任务尚未完成，当前状态: %s", subtitleTask.Status))
-		return
-	}
-	s.updateProgress(ctx, task.ID, 30, "字幕任务已完成，正在查找 SRT 文件")
-
-	// 3. 构造 SRT 文件路径
-	videoDir := filepath.Dir(video.Path)
-	videoBase := filepath.Base(video.Path)
-	videoExt := filepath.Ext(videoBase)
-	baseName := strings.TrimSuffix(videoBase, videoExt)
-	outputDir := filepath.Join(videoDir, baseName)
+	// 2. 检查输出目录中是否已有字幕文件：
+	//    - 有 srt：直接烧录；
+	//    - 无 srt：先自动执行字幕生成（提取音频 -> ASR -> 写 SRT），再烧录。
+	outputDir := model.VideoOutputDir(ctx, video)
+	baseName := model.VideoBaseName(video)
 	srtFilePath := filepath.Join(outputDir, baseName+".srt")
 
-	// 检查 SRT 文件是否存在
+	burnStart := 50
 	if _, err := os.Stat(srtFilePath); err != nil {
-		s.markFailed(ctx, task, fmt.Errorf("SRT 字幕文件不存在: %s", srtFilePath))
-		return
-	}
-	s.updateProgress(ctx, task.ID, 50, "SRT 文件已找到，正在将字幕写入视频")
+		// 未检测到字幕文件，自动生成字幕
+		if bootstrap.ASRProvider == nil {
+			s.markFailed(ctx, task, fmt.Errorf("未检测到字幕文件，且语音识别组件未就绪，无法自动生成字幕"))
+			return
+		}
+		if e := model.VideoSetTaskStatusTx(s.db.WithContext(ctx), video.ID, model.TaskTypeSubtitle, model.TaskStatusRunning); e != nil {
+			logger.Logger.Warn("同步字幕生成状态失败",
+				zap.String("video_id", video.ID),
+				zap.Error(e),
+			)
+		}
+		if err := os.MkdirAll(outputDir, 0755); err != nil {
+			s.markFailed(ctx, task, fmt.Errorf("创建输出目录失败: %w", err))
+			return
+		}
+		out.recordProduced(srtFilePath)
+		s.updateProgress(ctx, task.ID, 30, "未检测到字幕文件，正在自动生成字幕")
 
-	// 4. 确定实际处理源文件：优先使用用户选择的衍生视频（如去马赛克视频），否则为原视频
+		if _, err := s.generateSubtitleFile(ctx, video, srtFilePath, func(progress int, msg string) {
+			s.updateProgress(ctx, task.ID, progress, msg)
+		}); err != nil {
+			// 自动生成失败（含被用户取消），将字幕状态回退到最新字幕任务，避免残留 running
+			if e := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+				return model.VideoResyncTaskStatusTx(tx, video.ID, model.TaskTypeSubtitle)
+			}); e != nil {
+				logger.Logger.Warn("回退字幕生成状态失败",
+					zap.String("video_id", video.ID),
+					zap.Error(e),
+				)
+			}
+			s.markFailed(ctx, task, fmt.Errorf("自动生成字幕失败: %w", err))
+			return
+		}
+		if e := model.VideoSetTaskStatusTx(s.db.WithContext(ctx), video.ID, model.TaskTypeSubtitle, model.TaskStatusCompleted); e != nil {
+			logger.Logger.Warn("同步字幕生成状态失败",
+				zap.String("video_id", video.ID),
+				zap.Error(e),
+			)
+		}
+		s.updateProgress(ctx, task.ID, 95, "字幕文件生成完成，正在准备写入视频")
+		burnStart = 95
+	} else {
+		s.updateProgress(ctx, task.ID, 50, "字幕文件已找到，正在将字幕写入视频")
+	}
+
+	// 3. 确定实际处理源文件：优先使用用户选择的衍生视频（如去马赛克视频），否则为原视频
 	sourcePath := video.Path
 	if task.SourcePath != "" {
 		sourcePath = task.SourcePath
@@ -628,44 +771,74 @@ func (s *TaskScheduler) processSubtitleBurnTask(ctx context.Context, task *model
 			return
 		}
 	}
-	s.updateProgress(ctx, task.ID, 55, "正在将字幕写入视频")
 
-	// 5. 将字幕烧录到视频中（硬字幕），带实时进度回传
+	// 4. 将字幕烧录到视频中（硬字幕），带实时进度回传。
+	//    覆盖模式（选择了衍生视频）：先烧录到临时文件，成功后替换处理源文件本身，
+	//    不再生成 <base>_subtitled 新文件；原视频始终生成新文件。
+	videoExt := filepath.Ext(video.Path)
+	overwrite := task.Overwrite && sourcePath != video.Path
 	subtitledPath := filepath.Join(outputDir, baseName+"_subtitled"+videoExt)
+	burnPath := subtitledPath
+	if overwrite {
+		// 临时文件与源文件同目录，保证替换原子且在同一文件系统
+		burnPath = filepath.Join(outputDir, fmt.Sprintf("%s_burn_tmp_%s%s", baseName, task.ID[:8], videoExt))
+	}
+	out.recordProduced(burnPath)
 	lastBurnUpdate := time.Now()
-	if err := ffmpeg.BurnSubtitles(ctx, sourcePath, srtFilePath, subtitledPath, func(currentBytes, totalBytes int64) {
+	if err := ffmpeg.BurnSubtitles(ctx, sourcePath, srtFilePath, burnPath, func(currentBytes, totalBytes int64) {
 		// 节流：至少间隔 2 秒更新一次，避免频繁写库
 		if time.Since(lastBurnUpdate) < 2*time.Second {
 			return
 		}
 		lastBurnUpdate = time.Now()
 
+		// 烧录进度映射到 [burnStart, 100)，避免长时间停留在固定百分比
+		progress := burnStart
+		if totalBytes > 0 {
+			progress = burnStart + int(float64(100-burnStart)*float64(currentBytes)/float64(totalBytes))
+			if progress > 99 {
+				progress = 99
+			}
+		}
 		var msg string
 		if totalBytes > 0 {
-			msg = fmt.Sprintf("正在将字幕写入视频（%s/%s）", humanizeBytes(currentBytes), humanizeBytes(totalBytes))
+			msg = fmt.Sprintf("正在将字幕写入视频（%s/%s）", formatMB(currentBytes), formatMB(totalBytes))
 		} else {
 			msg = "正在将字幕写入视频"
 		}
-		s.updateProgress(ctx, task.ID, 50, msg)
+		s.updateProgress(ctx, task.ID, progress, msg)
 	}); err != nil {
+		// 覆盖模式下清理残留的临时文件，避免输出目录留下半成品
+		if overwrite {
+			os.Remove(burnPath)
+		}
 		s.markFailed(ctx, task, fmt.Errorf("字幕写入视频失败: %w", err))
 		return
 	}
+	if overwrite {
+		// 用烧录结果替换处理源文件（同目录 rename，原子操作）
+		if err := os.Rename(burnPath, sourcePath); err != nil {
+			os.Remove(burnPath)
+			s.markFailed(ctx, task, fmt.Errorf("替换处理源文件失败: %w", err))
+			return
+		}
+		burnPath = sourcePath
+	}
 	logger.Logger.Info("字幕已写入视频",
 		zap.String("task_id", task.ID),
-		zap.String("subtitled_video", subtitledPath),
+		zap.String("subtitled_video", burnPath),
 	)
 
 	s.markCompleted(ctx, task.ID, "", "字幕写入视频完成")
 	logger.Logger.Info("字幕写入视频任务执行完成",
 		zap.String("task_id", task.ID),
 		zap.String("srt_file", srtFilePath),
-		zap.String("subtitled_video", subtitledPath),
+		zap.String("subtitled_video", burnPath),
 	)
 }
 
 // processRepairTask 执行去马赛克任务：本地执行 Docker 去马赛克命令 -> 保存输出
-func (s *TaskScheduler) processRepairTask(ctx context.Context, task *model.Task) {
+func (s *TaskScheduler) processRepairTask(ctx context.Context, task *model.Task, out *taskOutput) {
 	if bootstrap.RepairExecutor == nil {
 		s.markFailed(ctx, task, fmt.Errorf("视频去马赛克执行器未初始化"))
 		return
@@ -699,18 +872,14 @@ func (s *TaskScheduler) processRepairTask(ctx context.Context, task *model.Task)
 
 	// 3. 准备输出目录：创建同名子目录；仅在源文件不在输出目录内时硬链接过去
 	//    （衍生视频本就在输出目录内，直接使用，避免 os.Link 对同一文件自身报错）
-	videoDir := filepath.Dir(video.Path)
-	videoBase := filepath.Base(video.Path)
-	videoExt := filepath.Ext(videoBase)
-	baseName := strings.TrimSuffix(videoBase, videoExt)
-	outputDir := filepath.Join(videoDir, baseName)
+	outputDir := model.VideoOutputDir(ctx, video)
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
 		s.markFailed(ctx, task, fmt.Errorf("创建输出目录失败: %w", err))
 		return
 	}
 	linkedPath := sourcePath
 	if filepath.Dir(sourcePath) != outputDir {
-		linkedPath = filepath.Join(outputDir, videoBase)
+		linkedPath = filepath.Join(outputDir, filepath.Base(video.Path))
 		if err := os.Link(sourcePath, linkedPath); err != nil {
 			s.markFailed(ctx, task, fmt.Errorf("创建视频硬链接失败: %w", err))
 			return
@@ -718,6 +887,8 @@ func (s *TaskScheduler) processRepairTask(ctx context.Context, task *model.Task)
 		// 无论去马赛克成功或失败，最后都清理硬链接
 		defer os.Remove(linkedPath)
 	}
+	// 去马赛克输出文件名由外部程序生成，记录执行前快照供取消时清理新增文件
+	out.snapshotOutputDir(outputDir)
 
 	// 4. 调用去马赛克执行器，传入输出目录中的源文件路径，
 	//    repair 会自动以 linkedPath 的父目录（即输出目录）为 Docker mount 根目录
@@ -751,6 +922,24 @@ func (s *TaskScheduler) processRepairTask(ctx context.Context, task *model.Task)
 		return
 	}
 
+	// 覆盖模式（选择了衍生视频）：用本次去马赛克产物替换处理源文件本身，
+	// 不再保留单独的 repaired 新文件
+	if task.Overwrite && sourcePath != video.Path {
+		produced := findNewOutputVideo(outputDir, out.snapshotFiles)
+		if produced == "" {
+			s.markFailed(ctx, task, fmt.Errorf("去马赛克完成但未找到输出文件，无法覆盖处理源文件"))
+			return
+		}
+		if err := os.Rename(produced, sourcePath); err != nil {
+			s.markFailed(ctx, task, fmt.Errorf("替换处理源文件失败: %w", err))
+			return
+		}
+		logger.Logger.Info("已用去马赛克结果覆盖处理源文件",
+			zap.String("task_id", task.ID),
+			zap.String("source_path", sourcePath),
+		)
+	}
+
 	s.markCompleted(ctx, task.ID, output, "视频去马赛克完成")
 	logger.Logger.Info("去马赛克任务执行完成",
 		zap.String("task_id", task.ID),
@@ -759,7 +948,7 @@ func (s *TaskScheduler) processRepairTask(ctx context.Context, task *model.Task)
 }
 
 // processUpscaleTask 执行清晰度去马赛克任务：本地执行 Docker 清晰度去马赛克命令 -> 保存输出
-func (s *TaskScheduler) processUpscaleTask(ctx context.Context, task *model.Task) {
+func (s *TaskScheduler) processUpscaleTask(ctx context.Context, task *model.Task, out *taskOutput) {
 	if bootstrap.UpscaleExecutor == nil {
 		s.markFailed(ctx, task, fmt.Errorf("清晰度去马赛克执行器未初始化"))
 		return
@@ -797,22 +986,31 @@ func (s *TaskScheduler) processUpscaleTask(ctx context.Context, task *model.Task
 		return
 	}
 
-	// 4. 准备输出目录
-	videoDir := filepath.Dir(video.Path)
-	videoBase := filepath.Base(video.Path)
-	videoExt := filepath.Ext(videoBase)
-	baseName := strings.TrimSuffix(videoBase, videoExt)
-	outputDir := filepath.Join(videoDir, baseName)
+	// 4. 准备输出目录与执行源文件：确保实际执行源位于输出目录内，
+	//    docker 以输出目录作为 bind mount 根，清晰度修复产物因此写入输出目录
+	//    （原视频不在输出目录内时先硬链接过去，避免污染输入目录）
+	outputDir := model.VideoOutputDir(ctx, video)
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
 		s.markFailed(ctx, task, fmt.Errorf("创建输出目录失败: %w", err))
 		return
 	}
+	execPath := sourcePath
+	if filepath.Dir(sourcePath) != outputDir {
+		execPath = filepath.Join(outputDir, filepath.Base(sourcePath))
+		if err := os.Link(sourcePath, execPath); err != nil {
+			s.markFailed(ctx, task, fmt.Errorf("创建视频硬链接失败: %w", err))
+			return
+		}
+		// 无论清晰度修复成功或失败，最后都清理硬链接
+		defer os.Remove(execPath)
+	}
+	out.recordProduced(filepath.Join(outputDir, upscale.OutputFileName(execPath, targetHeight)))
 
 	// 5. 调用清晰度去马赛克执行器
 	lastProgress := -1
 	lastProgressMsg := ""
 	lastUpdateAt := time.Time{}
-	output, err := bootstrap.UpscaleExecutor.Execute(ctx, sourcePath, targetWidth, targetHeight, func(progress int, message string) {
+	output, err := bootstrap.UpscaleExecutor.Execute(ctx, execPath, targetWidth, targetHeight, func(progress int, message string) {
 		now := time.Now()
 		progressChanged := progress != lastProgress
 		msgChanged := message != "" && message != lastProgressMsg
@@ -839,6 +1037,23 @@ func (s *TaskScheduler) processUpscaleTask(ctx context.Context, task *model.Task
 		return
 	}
 
+	// 覆盖模式（选择了衍生视频）：用清晰度修复产物替换处理源文件本身，
+	// 不再保留单独的 upscaled 新文件（产物与源文件同目录，rename 原子）
+	if task.Overwrite && sourcePath != video.Path {
+		if output == "" {
+			s.markFailed(ctx, task, fmt.Errorf("清晰度修复完成但未找到输出文件，无法覆盖处理源文件"))
+			return
+		}
+		if err := os.Rename(output, sourcePath); err != nil {
+			s.markFailed(ctx, task, fmt.Errorf("替换处理源文件失败: %w", err))
+			return
+		}
+		logger.Logger.Info("已用清晰度修复结果覆盖处理源文件",
+			zap.String("task_id", task.ID),
+			zap.String("source_path", sourcePath),
+		)
+	}
+
 	s.markCompleted(ctx, task.ID, output, "清晰度修复完成")
 	logger.Logger.Info("清晰度去马赛克任务执行完成",
 		zap.String("task_id", task.ID),
@@ -859,7 +1074,7 @@ func (s *TaskScheduler) updateProgress(ctx context.Context, taskID string, progr
 	}
 }
 
-// markCompleted 在事务中将任务标记为完成
+// markCompleted 在事务中将任务标记为完成，并同步视频对应任务类型的状态字段
 func (s *TaskScheduler) markCompleted(ctx context.Context, taskID string, resultJSON string, progressMsg string) {
 	// 用户已请求取消时，落定为 cancelled 而非 completed，避免取消与完成的竞态
 	if s.isCancelling(context.WithoutCancel(ctx), taskID) {
@@ -868,6 +1083,13 @@ func (s *TaskScheduler) markCompleted(ctx context.Context, taskID string, result
 		return
 	}
 	if err := s.db.WithContext(context.WithoutCancel(ctx)).Transaction(func(tx *gorm.DB) error {
+		var task model.Task
+		if err := tx.Select("video_id", "task_type").Where("id = ?", taskID).First(&task).Error; err != nil {
+			return err
+		}
+		if err := model.VideoSetTaskStatusTx(tx, task.VideoID, task.TaskType, model.TaskStatusCompleted); err != nil {
+			return err
+		}
 		return model.TaskUpdateResultTx(tx, taskID, resultJSON, progressMsg)
 	}); err != nil {
 		logger.Logger.Error("标记任务完成失败",
@@ -896,6 +1118,9 @@ func (s *TaskScheduler) markFailed(ctx context.Context, task *model.Task, err er
 		zap.Error(err),
 	)
 	if e := s.db.WithContext(context.WithoutCancel(ctx)).Transaction(func(tx *gorm.DB) error {
+		if err := model.VideoSetTaskStatusTx(tx, task.VideoID, task.TaskType, model.TaskStatusFailed); err != nil {
+			return err
+		}
 		return model.TaskUpdateFailedTx(tx, task.ID, err.Error(), task.RetryCount+1)
 	}); e != nil {
 		logger.Logger.Error("标记任务失败状态失败",
@@ -905,7 +1130,7 @@ func (s *TaskScheduler) markFailed(ctx context.Context, task *model.Task, err er
 	}
 }
 
-// markCancelled 在事务中将任务标记为已取消
+// markCancelled 在事务中将任务标记为已取消，并同步视频对应任务类型的状态字段
 func (s *TaskScheduler) markCancelled(ctx context.Context, task *model.Task, msg string) {
 	if msg == "" {
 		msg = "用户已取消"
@@ -915,6 +1140,18 @@ func (s *TaskScheduler) markCancelled(ctx context.Context, task *model.Task, msg
 		zap.String("task_type", task.TaskType),
 	)
 	if e := s.db.WithContext(context.WithoutCancel(ctx)).Transaction(func(tx *gorm.DB) error {
+		// 竞态路径传入的 task 可能只带 ID，需补查 video_id / task_type 才能同步视频字段
+		t := *task
+		if t.VideoID == "" || t.TaskType == "" {
+			var row model.Task
+			if err := tx.Select("video_id", "task_type").Where("id = ?", task.ID).First(&row).Error; err != nil {
+				return err
+			}
+			t.VideoID, t.TaskType = row.VideoID, row.TaskType
+		}
+		if err := model.VideoSetTaskStatusTx(tx, t.VideoID, t.TaskType, model.TaskStatusCancelled); err != nil {
+			return err
+		}
 		return model.TaskUpdateCancelledTx(tx, task.ID, msg)
 	}); e != nil {
 		logger.Logger.Error("标记任务取消状态失败",
@@ -924,25 +1161,7 @@ func (s *TaskScheduler) markCancelled(ctx context.Context, task *model.Task, msg
 	}
 }
 
-// humanizeBytes 将字节数格式化为可读的大小字符串，例如 122M、1.5G
-func humanizeBytes(bytes int64) string {
-	const unit = 1024
-	if bytes < unit {
-		return fmt.Sprintf("%dB", bytes)
-	}
-	div, exp := int64(unit), 0
-	for n := bytes / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	switch exp {
-	case 0:
-		return fmt.Sprintf("%dK", bytes/div)
-	case 1:
-		return fmt.Sprintf("%dM", bytes/div)
-	case 2:
-		return fmt.Sprintf("%dG", bytes/div)
-	default:
-		return fmt.Sprintf("%dT", bytes/div)
-	}
+// formatMB 将字节数固定格式化为 MB 单位，例如 122M、2048M
+func formatMB(bytes int64) string {
+	return fmt.Sprintf("%dM", bytes/(1024*1024))
 }

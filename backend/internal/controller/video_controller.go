@@ -104,6 +104,23 @@ func (ctl *VideoController) Delete(c *gin.Context) {
 	response.Success(c, nil)
 }
 
+// BatchDelete 批量删除视频记录，可选同时删除输出目录
+// POST /api/v1/videos/batch-delete
+func (ctl *VideoController) BatchDelete(c *gin.Context) {
+	var deleteReq req.VideoBatchDeleteReq
+	if err := c.ShouldBindJSON(&deleteReq); err != nil {
+		response.FailByBizError(c, enum.ErrInvalidParam)
+		return
+	}
+
+	res, err := ctl.videoLogic.BatchDelete(c.Request.Context(), &deleteReq)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	response.Success(c, res)
+}
+
 // DirFiles 获取视频输出目录下所有视频文件的详细信息，包括分辨率
 // GET /api/v1/videos/:id/dir-files
 func (ctl *VideoController) DirFiles(c *gin.Context) {

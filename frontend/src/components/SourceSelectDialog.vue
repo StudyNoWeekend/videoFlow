@@ -32,11 +32,12 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   (e: 'update:modelValue', value: boolean): void
-  /** 确认选择，path 为空串表示使用原视频 */
-  (e: 'confirm', path: string): void
+  /** 确认选择，path 为空串表示使用原视频；overwrite 表示是否覆盖所选的衍生视频 */
+  (e: 'confirm', payload: { path: string; overwrite: boolean }): void
 }>()
 
 const selectedPath = ref<string>('')
+const overwriteSelected = ref<boolean>(false)
 
 // 每次打开弹窗时重置选中项为原视频
 watch(
@@ -44,8 +45,16 @@ watch(
   (visible) => {
     if (visible) {
       selectedPath.value = ''
+      overwriteSelected.value = false
     }
   },
+)
+
+// 是否选择了衍生视频（非原视频），只有此时才提供“覆盖所选视频”勾选
+const derivedSelected = computed(() => selectedPath.value !== '')
+
+const selectedOption = computed<SourceSelectOption | null>(
+  () => props.options.find((o) => o.path === selectedPath.value) || null,
 )
 
 const visible = computed({
@@ -54,7 +63,7 @@ const visible = computed({
 })
 
 function handleConfirm(): void {
-  emit('confirm', selectedPath.value)
+  emit('confirm', { path: selectedPath.value, overwrite: overwriteSelected.value })
   visible.value = false
 }
 </script>
@@ -94,6 +103,14 @@ function handleConfirm(): void {
           </div>
         </el-radio>
       </el-radio-group>
+
+      <!-- 覆盖所选视频：仅在选择了衍生视频（非原视频）时提供勾选 -->
+      <div v-if="derivedSelected" class="source-select__overwrite">
+        <el-checkbox v-model="overwriteSelected" class="source-select__overwrite-checkbox">
+          {{ $t('videos.source.overwrite_label', { name: selectedOption?.name || '' }) }}
+        </el-checkbox>
+        <div class="source-select__overwrite-tip">{{ $t('videos.source.overwrite_tip') }}</div>
+      </div>
     </div>
     <template #footer>
       <el-button @click="visible = false">{{ $t('common.cancel') }}</el-button>
@@ -152,5 +169,25 @@ function handleConfirm(): void {
   font-family: var(--vf-font-mono);
   font-size: 11px;
   color: var(--vf-text-muted);
+}
+
+.source-select__overwrite {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border: 1px dashed var(--vf-border);
+  border-radius: var(--vf-radius);
+  background: var(--vf-bg-elevated);
+}
+
+.source-select__overwrite-checkbox {
+  --el-checkbox-text-color: var(--vf-text-primary);
+}
+
+.source-select__overwrite-tip {
+  margin-top: 4px;
+  margin-left: 24px;
+  font-size: 11px;
+  color: var(--vf-text-muted);
+  line-height: 1.5;
 }
 </style>

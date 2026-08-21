@@ -2,7 +2,7 @@ import request, { type ApiResponse } from './request'
 
 // 组件状态
 export type ComponentStatus = 'installed' | 'missing' | 'installing' | 'error'
-export type ComponentType = 'docker' | 'ffmpeg' | 'whisper_asr' | 'lada'
+export type ComponentType = 'docker' | 'ffmpeg' | 'whisper_asr' | 'lada' | 'video2x'
 
 export interface ComponentInfo {
   type: ComponentType
@@ -15,11 +15,11 @@ export interface ComponentInfo {
 }
 
 export interface ComponentInstallReq {
-  component_type: 'lada' | 'ffmpeg'
+  component_type: 'lada' | 'ffmpeg' | 'video2x'
 }
 
 export interface ComponentUninstallReq {
-  component_type: 'lada' | 'ffmpeg'
+  component_type: 'lada' | 'ffmpeg' | 'video2x'
 }
 
 export interface ProgressEvent {

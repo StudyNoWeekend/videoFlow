@@ -58,6 +58,7 @@ var (
 	ErrTaskNotCompleted        = NewBizError(10070004, "任务尚未完成，无法导出字幕", 400)
 	ErrTaskNoResult            = NewBizError(10070005, "任务暂无可用字幕结果", 404)
 	ErrTaskNotCancelable       = NewBizError(10070006, "仅等待中或运行中的任务可以取消", 400)
+	ErrTaskComponentMissing    = NewBizError(10070007, "任务依赖组件未就绪", 400)
 
 	// 字幕导出相关错误
 	ErrInvalidSubtitleFormat = NewBizError(10080001, "字幕格式参数错误，仅支持 srt/vtt/ass", 400)

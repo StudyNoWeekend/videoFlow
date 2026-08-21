@@ -12,6 +12,7 @@ const activeTab = ref('system')
 
 const form = ref<Setting>({
   video_dir: '',
+  output_dir: '',
   scan_interval: 60,
   asr_url: '',
   asr_language: 'zh',
@@ -79,6 +80,9 @@ onMounted(async () => {
                 <div class="section-grid section-grid--2">
                   <el-form-item :label="$t('settings.label.video_dir')">
                     <el-input v-model="form.video_dir" :placeholder="$t('settings.label.video_dir')" />
+                  </el-form-item>
+                  <el-form-item :label="$t('settings.label.output_dir')">
+                    <el-input v-model="form.output_dir" :placeholder="$t('settings.label.output_dir')" />
                   </el-form-item>
                   <el-form-item :label="$t('settings.label.scan_interval')">
                     <el-input-number v-model="form.scan_interval" :min="1" :max="86400" />

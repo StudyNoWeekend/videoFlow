@@ -3,6 +3,7 @@ package req
 // SettingReq 统一设置保存请求
 type SettingReq struct {
 	VideoDir          string `json:"video_dir"`
+	OutputDir         string `json:"output_dir"`
 	ScanInterval      int    `json:"scan_interval" binding:"gte=1"`
 	ASRURL            string `json:"asr_url" binding:"required,url"`
 	ASRLanguage       string `json:"asr_language" binding:"required"`

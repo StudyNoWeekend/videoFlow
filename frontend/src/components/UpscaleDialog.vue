@@ -25,7 +25,7 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   (e: 'update:modelValue', value: boolean): void
-  (e: 'confirm', payload: { sourcePath: string; targetWidth: number; targetHeight: number; processor: string; model: string; noiseLevel: number }): void
+  (e: 'confirm', payload: { sourcePath: string; targetWidth: number; targetHeight: number; processor: string; model: string; noiseLevel: number; overwrite: boolean }): void
 }>()
 
 interface TargetResolution {
@@ -36,6 +36,7 @@ interface TargetResolution {
 
 // 处理器/模型/降噪等级仅在创建清晰修复任务时选择，不再读取系统配置
 const selectedSourcePath = ref<string>('')
+const overwriteSelected = ref<boolean>(false)
 const selectedTargetResolution = ref<TargetResolution | null>(null)
 const selectedProcessor = ref<string>('realesrgan')
 const selectedModel = ref<string>('realesr-animevideov3')
@@ -110,6 +111,7 @@ watch(
   (visible) => {
     if (visible) {
       selectedSourcePath.value = ''
+      overwriteSelected.value = false
       selectedTargetResolution.value = null
       selectedProcessor.value = 'realesrgan'
       selectedModel.value = 'realesr-animevideov3'
@@ -123,11 +125,22 @@ const visible = computed({
   set: (value: boolean) => emit('update:modelValue', value),
 })
 
+// 原视频路径（files 中原视频的 fileType 为 original）
+const originalPath = computed<string>(() => {
+  const file = props.files.find((f) => f.fileType === 'original')
+  return file?.path || ''
+})
+
 // 当前选中源文件对象
 const selectedSourceFile = computed(() => {
   if (!selectedSourcePath.value) return null
   return props.files.find((f) => f.path === selectedSourcePath.value) || null
 })
+
+// 是否选择了衍生视频（非原视频），只有此时才提供“覆盖所选视频”勾选
+const derivedSelected = computed(
+  () => selectedSourcePath.value !== '' && selectedSourcePath.value !== originalPath.value,
+)
 
 // 各超分模型支持的放大倍数（Real-ESRGAN / Real-CUGAN 的 NCNN 模型按倍数分文件，
 // video2x 镜像中只内置了部分倍数的模型，选择不支持的倍数会在执行时直接失败）
@@ -148,9 +161,10 @@ const availableTargets = computed<TargetResolution[]>(() => {
   return resolveTargetResolutions(file.width, file.height, selectedProcessor.value, selectedModel.value)
 })
 
-// 切换源文件时重置目标分辨率
+// 切换源文件时重置目标分辨率，并复位覆盖勾选
 watch(selectedSourcePath, () => {
   selectedTargetResolution.value = null
+  overwriteSelected.value = false
 })
 
 /**
@@ -217,6 +231,7 @@ function handleConfirm(): void {
     processor: selectedProcessor.value,
     model: selectedModel.value,
     noiseLevel: selectedNoiseLevel.value,
+    overwrite: overwriteSelected.value,
   })
   visible.value = false
 }
@@ -272,6 +287,14 @@ function getFileTypeTag(fileType: string): string {
             </div>
           </el-radio>
         </el-radio-group>
+      </div>
+
+      <!-- 覆盖所选视频：仅在选择了衍生视频（非原视频）时提供勾选 -->
+      <div v-if="derivedSelected" class="upscale-dialog__overwrite">
+        <el-checkbox v-model="overwriteSelected" class="upscale-dialog__overwrite-checkbox">
+          {{ $t('videos.upscale.overwrite_label', { name: selectedSourceFile?.name || '' }) }}
+        </el-checkbox>
+        <div class="upscale-dialog__overwrite-tip">{{ $t('videos.upscale.overwrite_tip') }}</div>
       </div>
 
       <!-- 目标清晰度 -->
@@ -526,6 +549,26 @@ function getFileTypeTag(fileType: string): string {
   font-size: 12px;
   color: var(--vf-text-muted);
   margin-top: 8px;
+}
+
+.upscale-dialog__overwrite {
+  margin-bottom: 20px;
+  padding: 10px 12px;
+  border: 1px dashed var(--vf-border);
+  border-radius: var(--vf-radius);
+  background: var(--vf-bg-elevated);
+}
+
+.upscale-dialog__overwrite-checkbox {
+  --el-checkbox-text-color: var(--vf-text-primary);
+}
+
+.upscale-dialog__overwrite-tip {
+  margin-top: 4px;
+  margin-left: 24px;
+  font-size: 11px;
+  color: var(--vf-text-muted);
+  line-height: 1.5;
 }
 
 /* 修复 el-radio border 模式下白色文字看不清的问题 */

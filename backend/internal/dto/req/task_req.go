@@ -6,6 +6,9 @@ type TaskCreateReq struct {
 	TaskType string `json:"task_type" binding:"required,oneof=subtitle subtitle_burn deblur upscale"`
 	// SourcePath 可选：实际处理源文件路径，为空时默认使用关联视频（如仅选择原视频）
 	SourcePath string `json:"source_path"`
+	// Overwrite 是否覆盖处理源文件：仅当选择了衍生视频（SourcePath 非原视频）时有效，
+	// 任务输出直接替换处理源文件本身，不再生成新的输出文件
+	Overwrite bool `json:"overwrite"`
 	// TargetWidth 清晰度修复目标宽度（像素），仅 upscale 任务时需要
 	TargetWidth int `json:"target_width"`
 	// TargetHeight 清晰度修复目标高度（像素），仅 upscale 任务时需要
@@ -23,4 +26,11 @@ type TaskListReq struct {
 	Page     int    `form:"page" binding:"omitempty,gte=1"`
 	PageSize int    `form:"page_size" binding:"omitempty,gte=1,lte=100"`
 	TaskType string `form:"task_type" binding:"omitempty,oneof=subtitle subtitle_burn deblur upscale"`
+}
+
+// TaskBatchDeleteReq 任务批量删除请求
+type TaskBatchDeleteReq struct {
+	IDs []string `json:"ids" binding:"required,min=1"`
+	// DeleteFiles 是否同时删除任务对应的输出文件（srt/烧录/去马赛克/清晰度修复产物）
+	DeleteFiles bool `json:"delete_files"`
 }

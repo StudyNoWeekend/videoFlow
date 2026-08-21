@@ -14,6 +14,7 @@ func RegisterVideoRouter(rg *gin.RouterGroup) {
 	{
 		api.GET("", videoCtl.List)
 		api.POST("/scan", videoCtl.Scan)
+		api.POST("/batch-delete", videoCtl.BatchDelete)
 		api.PUT("/:id", videoCtl.Update)
 		api.DELETE("/:id", videoCtl.Delete)
 		api.GET("/:id/dir-files", videoCtl.DirFiles)

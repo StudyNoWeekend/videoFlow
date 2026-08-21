@@ -40,6 +40,7 @@ const (
 // GetSettings 获取统一设置，优先读取 settings 表，不存在则使用配置文件默认值
 func (l *SettingLogic) GetSettings(ctx context.Context) (*res.SettingRes, error) {
 	videoDir := model.SettingGetOrDefault(ctx, model.SettingKeyVideoDir, l.defaultVideoDir())
+	outputDir := model.SettingGetOrDefault(ctx, model.SettingKeyOutputDir, l.defaultOutputDir())
 	scanInterval := l.settingIntOrDefault(ctx, model.SettingKeyScanInterval, l.defaultScanInterval(), 1, 86400)
 	asrURL := model.SettingGetOrDefault(ctx, model.SettingKeyASRURL, l.defaultASRURL())
 	asrLanguage := model.SettingGetOrDefault(ctx, model.SettingKeyASRLanguage, l.defaultASRLanguage())
@@ -60,6 +61,7 @@ func (l *SettingLogic) GetSettings(ctx context.Context) (*res.SettingRes, error)
 	upscaleConcurrency := l.settingIntOrDefault(ctx, model.SettingKeyUpscaleConcurrency, l.defaultUpscaleConcurrency(), 1, 50)
 	return &res.SettingRes{
 		VideoDir:                videoDir,
+		OutputDir:               outputDir,
 		ScanInterval:            scanInterval,
 		ASRURL:                  asrURL,
 		ASRLanguage:             asrLanguage,
@@ -93,6 +95,16 @@ func (l *SettingLogic) UpdateSettings(ctx context.Context, updateReq *req.Settin
 		}
 	}
 
+	if updateReq.OutputDir != "" {
+		info, err := os.Stat(updateReq.OutputDir)
+		if err != nil {
+			return enum.ErrInvalidParam.WithMsg(fmt.Sprintf("输出目录不存在或无法访问: %v", err))
+		}
+		if !info.IsDir() {
+			return enum.ErrInvalidParam.WithMsg("输出目录必须是目录")
+		}
+	}
+
 	if updateReq.ScanInterval <= 0 {
 		return enum.ErrInvalidParam.WithMsg("扫描间隔必须大于 0")
 	}
@@ -110,6 +122,7 @@ func (l *SettingLogic) UpdateSettings(ctx context.Context, updateReq *req.Settin
 
 	settings := map[string]string{
 		model.SettingKeyVideoDir:                updateReq.VideoDir,
+		model.SettingKeyOutputDir:               updateReq.OutputDir,
 		model.SettingKeyScanInterval:            strconv.Itoa(updateReq.ScanInterval),
 		model.SettingKeyASRURL:                  updateReq.ASRURL,
 		model.SettingKeyASRLanguage:             updateReq.ASRLanguage,
@@ -261,6 +274,13 @@ func (l *SettingLogic) defaultVideoDir() string {
 		return bootstrap.Config.Video.Dir
 	}
 	return model.DefaultVideoDir
+}
+
+func (l *SettingLogic) defaultOutputDir() string {
+	if bootstrap.Config != nil {
+		return bootstrap.Config.Output.Dir
+	}
+	return model.DefaultOutputDir
 }
 
 func (l *SettingLogic) defaultScanInterval() int {

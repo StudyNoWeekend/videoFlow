@@ -7,6 +7,7 @@ type TaskRes struct {
 	TaskType          string      `json:"task_type"`
 	Status            string      `json:"status"`
 	SourcePath        string      `json:"source_path,omitempty"` // 实际处理源文件路径，空表示使用关联视频
+	Overwrite         bool        `json:"overwrite,omitempty"`   // 是否覆盖处理源文件（仅衍生视频有效）
 	TargetWidth       int         `json:"target_width,omitempty"`
 	TargetHeight      int         `json:"target_height,omitempty"`
 	UpscaleProcessor  string      `json:"upscale_processor,omitempty"`

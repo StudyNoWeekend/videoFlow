@@ -1,11 +1,11 @@
 import request, { type ApiResponse } from './request'
 
-// 任务状态快照
+// 任务状态快照（视频列表仅展示状态徽标，具体进度/错误详见任务页）
 export interface TaskSnapshot {
-  status: 'pending' | 'running' | 'completed' | 'failed'
-  progress: number
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelling' | 'cancelled'
+  progress?: number
   error_msg?: string
-  updated_at: number
+  updated_at?: number
 }
 
 // 视频信息
@@ -100,6 +100,23 @@ export function updateVideo(id: string, data: VideoUpdateReq): Promise<Video> {
  */
 export function deleteVideo(id: string): Promise<void> {
   return request.delete<ApiResponse<void>>(`/api/v1/videos/${id}`).then((res) => res.data.data)
+}
+
+// 批量删除结果
+export interface BatchDeleteRes {
+  deleted: number
+  skipped: number
+}
+
+/**
+ * 批量删除视频记录
+ * @param ids 视频 ID 列表
+ * @param deleteFiles 是否同时删除视频对应的输出目录（srt、烧录/去马赛克/清晰度修复产物）
+ */
+export function batchDeleteVideos(ids: string[], deleteFiles: boolean): Promise<BatchDeleteRes> {
+  return request
+    .post<ApiResponse<BatchDeleteRes>>('/api/v1/videos/batch-delete', { ids, delete_files: deleteFiles })
+    .then((res) => res.data.data)
 }
 
 // 视频目录中的文件信息

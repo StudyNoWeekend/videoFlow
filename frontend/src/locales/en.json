@@ -65,6 +65,8 @@
 		  "videos.source.tip": "Derived videos with the same name exist. Choose which video to deblur:",
 	  "videos.source.subtitle_burn_tip": "Derived videos exist. Choose which video to burn subtitles into:",
 		  "videos.source.original_video": "Original video (default)",
+		  "videos.source.overwrite_label": "Overwrite selected video ({name})",
+		  "videos.source.overwrite_tip": "When checked, the result will replace the selected video file directly instead of creating a new file.",
 		  "videos.upscale.source_label": "Source Video",
 		  "videos.upscale.target_label": "Target Resolution",
 		  "videos.upscale.processor_label": "Upscale Processor",
@@ -72,6 +74,8 @@
 	  "videos.upscale.noise_label": "Noise Level",
 		  "videos.upscale.select_source": "Please select a source video first",
 		  "videos.upscale.no_target": "Source resolution is already at maximum, no suitable upscale target",
+		  "videos.upscale.overwrite_label": "Overwrite selected video ({name})",
+		  "videos.upscale.overwrite_tip": "When checked, the upscaled result will replace the selected video file directly instead of creating a new file.",
 
   "tasks.title": "Task Monitor",
   "tasks.cancel.confirm": "Are you sure you want to cancel this task?",

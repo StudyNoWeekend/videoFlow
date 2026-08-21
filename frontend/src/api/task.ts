@@ -1,8 +1,17 @@
 import request, { type ApiResponse } from './request'
+import type { ComponentType } from './component'
 import type { Video } from './video'
 
 // 任务类型
 export type TaskType = 'subtitle' | 'subtitle_burn' | 'deblur' | 'upscale'
+
+// 创建任务所需的组件（与后端 component.TaskTypeDependencies 保持一致）
+export const TASK_REQUIRED_COMPONENTS: Record<TaskType, ComponentType[]> = {
+  subtitle: ['ffmpeg', 'whisper_asr'],
+  subtitle_burn: ['ffmpeg'],
+  deblur: ['docker', 'lada'],
+  upscale: ['docker', 'video2x'],
+}
 
 // 任务状态
 export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelling' | 'cancelled'
@@ -14,6 +23,8 @@ export interface Task {
   task_type: TaskType
   status: TaskStatus
   source_path?: string
+  /** 是否覆盖处理源文件（仅选择了衍生视频时有效） */
+  overwrite?: boolean
   progress: number
   progress_msg?: string
   result?: unknown
@@ -38,6 +49,8 @@ export interface TaskCreateReq {
   task_type: TaskType
   /** 可选：实际处理源文件路径，为空时默认使用关联视频 */
   source_path?: string
+  /** 可选：是否覆盖处理源文件（仅选择了衍生视频时有效） */
+  overwrite?: boolean
   /** 可选：放大任务的输出宽度（目标分辨率） */
   target_width?: number
   /** 可选：放大任务的输出高度（目标分辨率） */
@@ -55,6 +68,7 @@ export interface TaskCreateReq {
  * @param videoId 视频 ID
  * @param taskType 任务类型
  * @param sourcePath 可选：实际处理源文件路径，为空时默认使用关联视频
+ * @param overwrite 可选：是否覆盖处理源文件（仅选择了衍生视频时有效，true 时结果直接替换所选视频）
  * @param targetWidth 可选：放大目标宽度
  * @param targetHeight 可选：放大目标高度
  * @param upscaleProcessor 可选：清晰度修复处理器（仅 upscale）
@@ -65,6 +79,7 @@ export function createTask(
   videoId: string,
   taskType: TaskType,
   sourcePath?: string,
+  overwrite?: boolean,
   targetWidth?: number,
   targetHeight?: number,
   upscaleProcessor?: string,
@@ -76,6 +91,7 @@ export function createTask(
     task_type: taskType,
   }
   if (sourcePath) body.source_path = sourcePath
+  if (overwrite !== undefined) body.overwrite = overwrite
   if (targetWidth !== undefined) body.target_width = targetWidth
   if (targetHeight !== undefined) body.target_height = targetHeight
   if (upscaleProcessor !== undefined) body.upscale_processor = upscaleProcessor
@@ -123,7 +139,27 @@ export function cancelTask(id: string): Promise<Task> {
 /**
  * 删除任务
  * @param id 任务 ID
+ * @param deleteFiles 是否同时删除任务对应的输出文件（srt/烧录/去马赛克/清晰度修复产物）
  */
-export function deleteTask(id: string): Promise<void> {
-  return request.delete<ApiResponse<void>>(`/api/v1/tasks/${id}`).then((res) => res.data.data)
+export function deleteTask(id: string, deleteFiles = false): Promise<void> {
+  return request
+    .delete<ApiResponse<void>>(`/api/v1/tasks/${id}`, { params: { delete_files: deleteFiles } })
+    .then((res) => res.data.data)
+}
+
+// 批量删除结果
+export interface BatchDeleteRes {
+  deleted: number
+  skipped: number
+}
+
+/**
+ * 批量删除任务记录，运行中的任务会被跳过
+ * @param ids 任务 ID 列表
+ * @param deleteFiles 是否同时删除任务对应的输出文件
+ */
+export function batchDeleteTasks(ids: string[], deleteFiles = false): Promise<BatchDeleteRes> {
+  return request
+    .post<ApiResponse<BatchDeleteRes>>('/api/v1/tasks/batch-delete', { ids, delete_files: deleteFiles })
+    .then((res) => res.data.data)
 }

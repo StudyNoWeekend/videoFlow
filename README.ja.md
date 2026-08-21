@@ -55,12 +55,12 @@ Whisper や FFmpeg を単体で使うのは難しくありませんが、「デ�
 
 ## ✨ 機能特性
 
-- **動画ディレクトリスキャン** - 手動スキャンまたはバックグラウンドでの定期自動スキャン、動画を自動で取り込み、カード型のページング表示
+- **入力 / 出力ディレクトリの分離** - 入力ディレクトリをスキャンして自動取り込み。タスクの成果物（字幕 / 焼き込み動画 / モザイク除去 / 高画質化動画）は設定可能な出力ディレクトリに出力され、タスクの状態は動画レコードの状態フィールドを基準に、タスクのライフサイクルでリアルタイムに同期
 - **字幕生成** - Whisper ASR ベース、言語、VAD フィルタ、タスクタイプ、音声の事前エンコード、初期プロンプト、単語レベルのタイムスタンプ、複数の出力形式（json / srt / vtt / txt / tsv）に対応
 - **モザイク除去** - Docker イメージ `ladaapp/lada` ベース、x86_64 CPU および NVIDIA CUDA GPU（Turing シリーズ以降、RTX 20xx ～ RTX 50xx シリーズ）に対応。CUDA デバイスは自動でコンテナに透過（`--gpus`）、GPU 障害の原因を自動的にヒント表示
 - **高画質化** - Video2X（`ghcr.io/k4yt3x/video2x:latest`）で動画をより高解像度にアップスケール、Real-ESRGAN / Real-CUGAN / libplacebo プロセッサに対応。ターゲット解像度とノイズ軽減レベルはタスクごとに指定
-- **タスク管理** - 作成 / 照会 / 削除 / 失敗リトライ、タイプ別フィルタ、リアルタイムのプログレスバー、フロントエンドは 2 秒間隔でポーリング更新
-- **タスクスケジューラ** - バックグラウンドのスケジューラが設定された並行数制限に従って字幕 / モザイク除去 / 高画質化タスクを実行。ポーリング間隔はオンラインで設定可能
+- **タスク管理** - 作成 / 照会 / 削除（複数選択での一括削除対応、出力ファイルも同時に削除するチェックボックスあり）/ 失敗リトライ、タイプ別フィルタ、リアルタイムのプログレスバー、フロントエンドは 2 秒間隔でポーリング更新。実行中のタスクを優先表示し、同じ状態内では新しいものが先頭
+- **タスクスケジューラ** - バックグラウンドのスケジューラが設定された並行数制限に従って字幕 / モザイク除去 / 高画質化タスクを実行。ポーリング間隔はオンラインで設定可能。キャンセル時は残った半製品の出力ファイルを自動クリーンアップ
 - **ユーザー認証** - 初回起動時の管理者アカウント初期化ガイド、ログイン / パスワード変更 / パスワードリセット。業務 API はすべて JWT 認証で保護
 - **ランタイム設定** - 統合された設定ページ、すべての設定をオンラインで変更し永続化（SQLite）、保存すると即座にホット反映
 - **FFmpeg スマート呼び出し** - ローカルの ffmpeg を自動検出し、手動設定不要
@@ -92,6 +92,11 @@ docker run -d --name videoflow \
   -p 8080:8080 \
   -v "$PWD/config.yaml:/app/config/config.yaml:ro" \
   -v "$PWD/data:/app/data" \
+  # 動画ディレクトリ（入力、読み取り専用マウント）と出力ディレクトリ（書き込み可）をマウントし、設定ページでコンテナ内パスを設定
+  -v /path/to/videos:/videos:ro \
+  -v /path/to/output:/output \
+  -e APP_VIDEO_DIR=/videos \
+  -e APP_OUTPUT_DIR=/output \
   -v "$PWD/logs:/app/logs" \
   ghcr.io/studynoweekend/videoflow:latest
 ```
@@ -110,6 +115,10 @@ docker run -d --name videoflow \
   -e APP_HTTP_PORT=9090 -p 9090:9090 \
   -v "$PWD/config.yaml:/app/config/config.yaml:ro" \
   -v "$PWD/data:/app/data" \
+  -v /path/to/videos:/videos:ro \
+  -v /path/to/output:/output \
+  -e APP_VIDEO_DIR=/videos \
+  -e APP_OUTPUT_DIR=/output \
   ghcr.io/studynoweekend/videoflow:latest
 ```
 
@@ -122,6 +131,10 @@ docker run -d --name videoflow \
   -e APP_HTTP_PORT=8080 -p 8080:8080 \
   -v "$PWD/config.yaml:/app/config/config.yaml:ro" \
   -v "$PWD/data:/app/data" \
+  -v /path/to/videos:/videos:ro \
+  -v /path/to/output:/output \
+  -e APP_VIDEO_DIR=/videos \
+  -e APP_OUTPUT_DIR=/output \
   video-captions:latest
 ```
 
@@ -157,7 +170,7 @@ APP_HTTP_PORT=9090 go run ./cmd/api   # 后端
 ## 🎬 使い方
 
 1. サービスを起動し、ブラウザでフロントエンドのアドレスにアクセス。初回は管理者アカウントを初期化してログイン
-2. 「設定」ページでローカルの動画ディレクトリと ASR サービスのアドレスを設定し、保存
+2. 「設定」ページでローカルの動画ディレクトリ（入力）、タスクの出力ディレクトリ、ASR サービスのアドレスを設定し、保存
 3. 「動画リスト」ページでスキャンをクリックすると、動画が自動で取り込まれます
 4. 動画カードの「字幕を生成」をクリックして、字幕タスクを作成
 5. 「タスク管理」ページでリアルタイムの進捗を確認（2 秒ごとに自動更新）
@@ -205,6 +218,9 @@ database:
   dsn: data/app.db
 video:
   dir: ""
+output:
+  # タスクの出力ディレクトリ（任意。空の場合は元動画と同じディレクトリ内のサブディレクトリに出力）
+  dir: ""
 scan:
   interval: 60
 asr:
@@ -235,6 +251,7 @@ viper のプレフィックスは `APP_`、設定キーの `.` は `_` に変換
 | --- | --- | --- |
 | `APP_HTTP_PORT` | `http.port` | `8080` |
 | `APP_VIDEO_DIR` | `video.dir` | `""` |
+| `APP_OUTPUT_DIR` | `output.dir` | `""` |
 | `APP_SCAN_INTERVAL` | `scan.interval` | `60` |
 | `APP_ASR_URL` | `asr.url` | `http://127.0.0.1:9999/asr` |
 | `APP_ASR_LANGUAGE` | `asr.language` | `zh` |
@@ -251,7 +268,11 @@ viper のプレフィックスは `APP_`、設定キーの `.` は `_` に変換
 | `/app/config/config.yaml` | 設定ファイル（読み取り専用マウント） |
 | `/app/data` | SQLite データベースの永続化（`data/app.db`） |
 | `/app/logs` | ログ出力 |
+| `/<コンテナ内動画ディレクトリ>` | ホストの動画ディレクトリをコンテナ内にマウント（例 `/videos`、読み取り専用）。設定ページで `video.dir` にこのパスを指定 |
+| `/<コンテナ内出力ディレクトリ>` | タスクの出力ディレクトリ（例 `/output`、**書き込み可必須**）。設定ページで `output.dir` にこのパスを指定 |
 | `/var/run/docker.sock` | （任意）モザイク除去 / 高画質化にはホストマシンの Docker socket をマウントする必要があります |
+
+> **出力ディレクトリについて：** タスクの成果物（srt / 焼き込み動画 / モザイク除去 / 高画質化動画）は、設定ページの `output.dir` に指定したコンテナ内パス（例 `/output`）に出力されます。このマウントは書き込み可能である必要があります。入力ディレクトリは読み取り専用マウントのため、成果物を入力ディレクトリに書き込むことはできません。動画が入力ディレクトリのサブフォルダにある場合は、その相対構造をミラーリングします（例 `output/<サブフォルダ>/<動画名>/`）。
 
 </details>
 
@@ -304,6 +325,7 @@ viper のプレフィックスは `APP_`、設定キーの `.` は `_` に変換
 | --- | --- | --- |
 | `POST` | `/api/v1/videos/scan` | 動画ディレクトリをスキャンして取り込み |
 | `GET` | `/api/v1/videos` | 動画リストのページング照会 |
+| `POST` | `/api/v1/videos/batch-delete` | 動画レコードの一括削除（body に `ids`、任意で `delete_files` により出力ディレクトリも削除） |
 | `PUT` | `/api/v1/videos/:id` | 動画情報の更新 |
 | `DELETE` | `/api/v1/videos/:id` | 動画レコードの削除 |
 
@@ -315,11 +337,14 @@ viper のプレフィックスは `APP_`、設定キーの `.` は `_` に変換
 | メソッド | パス | 説明 |
 | --- | --- | --- |
 | `POST` | `/api/v1/tasks` | タスク作成（字幕 / 字幕焼き込み / モザイク除去 / 高画質化） |
-| `GET` | `/api/v1/tasks` | タスクリストのページング照会（タイプでフィルタ可能） |
+| `GET` | `/api/v1/tasks` | タスクリストのページング照会（タイプでフィルタ可能、実行中タスクを優先表示） |
+| `POST` | `/api/v1/tasks/batch-delete` | タスクレコードの一括削除（body に `ids`、任意で `delete_files` により出力ファイルも削除） |
 | `POST` | `/api/v1/tasks/:id/retry` | 失敗タスクのリトライ |
-| `DELETE` | `/api/v1/tasks/:id` | タスクの削除 |
+| `DELETE` | `/api/v1/tasks/:id` | タスクの削除（任意で `?delete_files=true` により出力ファイルも削除） |
 
-タスクステータス：`pending`（保留中）-> `running`（実行中）-> `completed`（完了）/ `failed`（失敗）
+タスクステータス：`pending`（保留中）-> `running`（実行中）-> `completed`（完了）/ `failed`（失敗）/ `cancelled`（キャンセル済み）
+
+> **タスク状態は動画レコードが基準**：動画ページのタスク状態列は、動画レコード内のタスク状態フィールド（`subtitle_status` / `subtitle_burn_status` / `deblur_status` / `upscale_status`）を直接読み取り、タスクのライフサイクルでリアルタイムに同期します（作成→保留中、取得→実行中、完了→完了、失敗→失敗、キャンセル→キャンセル、タスク削除→ロールバック/クリア）。タスクレコード削除時は、対応する出力ファイルも同時に削除するか選択できます。
 
 > **高画質化タスクのパラメータ**：作成時にターゲット解像度（`target_width` / `target_height`）を指定します。プロセッサ（`upscale_processor`：`realesrgan` / `realcugan` / `libplacebo`）、モデル（`upscale_model`）、ノイズ軽減レベル（`upscale_noise_level`、-1 ～ 3）は必要に応じて設定可能です。
 
@@ -383,6 +408,7 @@ videoFlow/
 ## 🛡️ 注意事項
 
 - **FFmpeg は必須**：`ffmpeg.provider` は `local` 固定、イメージに ffmpeg が内蔵されています。ローカルでソースから実行する場合は各自でインストールしてください
+- **タスク出力には書き込み可能なディレクトリが必要**：Docker デプロイ時は書き込み可能な出力ディレクトリ（例 `/output`）を必ずマウントし、`output.dir` を設定してください。未設定の場合は元動画の隣のサブディレクトリに出力され、入力ディレクトリが読み取り専用マウントだと書き込みに失敗します
 - **モザイク除去 / 高画質化には Docker が必要**：コンテナデプロイ時にホストマシンの Docker socket をマウントする必要があります。この機能を使わない場合は無視でき、サービスの起動には影響しません
 - **初回使用時は初期化が必要**：ブラウザでの初回アクセス時に管理者アカウントの初期化が案内され、ログイン後に業務機能を利用できます
 - **ASR サービスは各自で用意**：[Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice) をご自身でデプロイし、`asr.url` を設定してください

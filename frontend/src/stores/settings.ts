@@ -5,6 +5,7 @@ import { getSettings, updateSettings, type Setting } from '@/api/setting'
 // 默认设置值
 const defaultSetting: Setting = {
   video_dir: '',
+  output_dir: '',
   scan_interval: 60,
   asr_url: 'http://1.12.70.219:9999/asr',
   asr_language: 'zh',

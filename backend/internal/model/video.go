@@ -20,6 +20,12 @@ type Video struct {
 	Height   int    `gorm:"default:0;comment:视频高度（像素）" json:"height"`
 	Duration int64  `gorm:"default:0;comment:视频时长（秒）" json:"duration"`
 	Size     int64  `gorm:"default:0;comment:视频文件大小（字节）" json:"size"`
+	// 各任务类型的最新状态（空串表示从未创建过该类型任务）。
+	// 以最新任务记录为准由 VideoResyncTaskStatusTx 维护，视频列表据此展示状态。
+	SubtitleStatus     string `gorm:"type:varchar(32);not null;default:'';comment:字幕生成任务状态" json:"subtitle_status"`
+	SubtitleBurnStatus string `gorm:"type:varchar(32);not null;default:'';comment:字幕写入任务状态" json:"subtitle_burn_status"`
+	DeblurStatus       string `gorm:"type:varchar(32);not null;default:'';comment:去马赛克任务状态" json:"deblur_status"`
+	UpscaleStatus      string `gorm:"type:varchar(32);not null;default:'';comment:清晰度修复任务状态" json:"upscale_status"`
 }
 
 // TableName 指定表名
@@ -208,4 +214,95 @@ func VideoDelete(ctx context.Context, id string) error {
 		return gorm.ErrRecordNotFound
 	}
 	return nil
+}
+
+// VideoBaseName 返回视频文件名去除扩展名后的名称，例如 "movie.mp4" -> "movie"
+func VideoBaseName(v *Video) string {
+	return strings.TrimSuffix(v.Name, filepath.Ext(v.Name))
+}
+
+// VideoTaskStatusColumn 返回任务类型在 videos 表中对应的状态字段列名，
+// 未知类型返回空串（调用方应忽略）。
+func VideoTaskStatusColumn(taskType string) string {
+	switch taskType {
+	case TaskTypeSubtitle:
+		return "subtitle_status"
+	case TaskTypeSubtitleBurn:
+		return "subtitle_burn_status"
+	case TaskTypeDeblur, TaskTypeRepair:
+		return "deblur_status"
+	case TaskTypeUpscale:
+		return "upscale_status"
+	default:
+		return ""
+	}
+}
+
+// VideoSetTaskStatusTx 在事务中直接设置视频指定任务类型的状态字段。
+// 调用方已知目标状态时用它，避免子查询。
+func VideoSetTaskStatusTx(tx *gorm.DB, videoID, taskType, status string) error {
+	column := VideoTaskStatusColumn(taskType)
+	if column == "" || videoID == "" {
+		return nil
+	}
+	return tx.Model(&Video{}).Where("id = ?", videoID).Update(column, status).Error
+}
+
+// VideoResyncTaskStatusTx 在事务中把视频指定任务类型的状态字段与最新任务记录对齐：
+// 取该类型最新一条任务的状态写入，无任务则清空字段。
+func VideoResyncTaskStatusTx(tx *gorm.DB, videoID, taskType string) error {
+	column := VideoTaskStatusColumn(taskType)
+	if column == "" || videoID == "" {
+		return nil
+	}
+	var status string
+	if err := tx.Model(&Task{}).
+		Where("video_id = ? AND task_type = ?", videoID, taskType).
+		Order("created_at DESC, id DESC").
+		Limit(1).
+		Pluck("status", &status).Error; err != nil {
+		return err
+	}
+	return tx.Model(&Video{}).Where("id = ?", videoID).Update(column, status).Error
+}
+
+// resyncTaskTypes 视频状态全量回填覆盖的任务类型
+var resyncTaskTypes = []string{TaskTypeSubtitle, TaskTypeSubtitleBurn, TaskTypeDeblur, TaskTypeUpscale}
+
+// VideoResyncAllTaskStatus 全量把 videos 表各任务状态字段与最新任务记录对齐。
+// 用于启动时回填历史数据，以及调度器停摆（running 批量置失败）后的一致性修复。
+func VideoResyncAllTaskStatus(ctx context.Context) error {
+	for _, taskType := range resyncTaskTypes {
+		column := VideoTaskStatusColumn(taskType)
+		stmt := fmt.Sprintf(
+			"UPDATE videos SET %s = COALESCE((SELECT t.status FROM tasks t WHERE t.video_id = videos.id AND t.task_type = ? AND t.deleted_at IS NULL ORDER BY t.created_at DESC, t.id DESC LIMIT 1), '')",
+			column,
+		)
+		if err := DB.WithContext(ctx).Exec(stmt, taskType).Error; err != nil {
+			return fmt.Errorf("回填视频 %s 状态失败: %w", taskType, err)
+		}
+	}
+	return nil
+}
+
+// VideoOutputDir 计算视频的任务输出目录：
+//   - 配置了 output_dir 且视频位于 video_dir 下：output_dir/<相对子目录>/<base>，
+//     镜像输入目录结构，避免不同子目录下的同名视频互相覆盖；
+//   - 配置了 output_dir 但视频不在 video_dir 下（如手动扫描其它路径）：output_dir/<base>；
+//   - 未配置 output_dir（兼容旧行为）：<视频所在目录>/<base>。
+func VideoOutputDir(ctx context.Context, v *Video) string {
+	base := VideoBaseName(v)
+	outputDir := SettingGet(ctx, SettingKeyOutputDir)
+	if outputDir == "" {
+		return filepath.Join(filepath.Dir(v.Path), base)
+	}
+
+	videoDir := SettingGet(ctx, SettingKeyVideoDir)
+	if videoDir != "" {
+		// 仅当视频在输入目录内部时镜像相对子目录结构
+		if rel, err := filepath.Rel(videoDir, filepath.Dir(v.Path)); err == nil && rel != "." && !strings.HasPrefix(rel, "..") {
+			return filepath.Join(outputDir, rel, base)
+		}
+	}
+	return filepath.Join(outputDir, base)
 }

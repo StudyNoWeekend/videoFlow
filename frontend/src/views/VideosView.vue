@@ -2,16 +2,19 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useI18n } from 'vue-i18n'
-import { listVideos, scanVideos, deleteVideo, listDirFiles } from '@/api/video'
-import { createTask } from '@/api/task'
+import { listVideos, scanVideos, deleteVideo, batchDeleteVideos, listDirFiles } from '@/api/video'
+import { createTask, TASK_REQUIRED_COMPONENTS } from '@/api/task'
+import type { TaskType } from '@/api/task'
 import type { Video, TaskSnapshot, OutputFile } from '@/api/video'
 import SourceSelectDialog, { type SourceSelectOption } from '@/components/SourceSelectDialog.vue'
 import UpscaleDialog from '@/components/UpscaleDialog.vue'
 import { useSettingsStore } from '@/stores/settings'
-import { formatDuration, formatFileSize } from '@/utils/format'
+import { useComponentStore } from '@/stores/component'
+import { formatFileSize } from '@/utils/format'
 
 const { t } = useI18n()
 const settingsStore = useSettingsStore()
+const componentStore = useComponentStore()
 
 const scanPath = ref<string>('')
 const loading = ref<boolean>(false)
@@ -21,6 +24,9 @@ const page = ref<number>(1)
 const pageSize = ref<number>(12)
 const total = ref<number>(0)
 let pollTimer: number | null = null
+
+// 多选批量删除
+const selectedVideos = ref<Video[]>([])
 
 // 选择处理源弹窗状态（有同名衍生视频时让用户选择对哪条视频执行任务）
 const sourceDialogVisible = ref<boolean>(false)
@@ -43,25 +49,6 @@ const pollingOptions = [
   { value: 0, label: 'videos.polling.off' },
 ]
 const pollingInterval = ref<number>(0)
-
-// 树形表格展开行 key 集合
-const expandedRows = ref<string[]>([])
-const defaultExpandAll = ref<boolean>(true)
-
-// 输出文件行唯一 key 前缀
-const OUTPUT_ROW_PREFIX = '__output__'
-
-function getRowKey(row: Video | OutputFile): string {
-  if ('id' in row && row.id) {
-    return row.id
-  }
-  return OUTPUT_ROW_PREFIX + (row as OutputFile).name
-}
-
-// 判断是否为输出文件子行
-function isOutputRow(row: Video | OutputFile): boolean {
-  return !('id' in row) || !row.id
-}
 
 async function loadVideos(): Promise<void> {
   loading.value = true
@@ -168,12 +155,90 @@ async function handleDelete(video: Video): Promise<void> {
   }
 }
 
+function handleSelectionChange(rows: Video[]): void {
+  selectedVideos.value = rows
+}
+
+async function handleBatchDelete(): Promise<void> {
+  const ids = selectedVideos.value.map((v) => v.id)
+  if (ids.length === 0) return
+
+  // 在确认弹窗中提供“同时删除输出文件”勾选项，由用户决定删除范围
+  const checkboxId = 'video-batch-delete-files'
+  let confirmed = false
+  try {
+    await ElMessageBox.confirm(
+      `<p style="margin: 0 0 12px;">${t('videos.batch_delete.confirm', { count: ids.length })}</p>
+       <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px;">
+         <input id="${checkboxId}" type="checkbox" style="accent-color: var(--vf-accent, #409eff);" />
+         ${t('videos.batch_delete.delete_files_label')}
+       </label>`,
+      t('common.notice'),
+      { dangerouslyUseHTMLString: true, confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel'), type: 'warning' }
+    )
+    confirmed = true
+  } catch (error) {
+    confirmed = false
+    if (error !== 'cancel') {
+      // 非取消操作，已在拦截器中提示
+    }
+  }
+  if (!confirmed) return
+
+  const deleteFiles = (document.getElementById(checkboxId) as HTMLInputElement | null)?.checked ?? false
+  try {
+    const res = await batchDeleteVideos(ids, deleteFiles)
+    const msg = deleteFiles
+      ? t('videos.batch_delete.success_with_files', { deleted: res.deleted, skipped: res.skipped })
+      : t('videos.batch_delete.success', { deleted: res.deleted, skipped: res.skipped })
+    ElMessage.success(msg)
+    selectedVideos.value = []
+    await loadVideos()
+  } catch {
+    // 请求失败已由拦截器提示
+  }
+}
+
 function isTaskRunning(task?: TaskSnapshot): boolean {
   return !!task && (task.status === 'pending' || task.status === 'running')
 }
 
+/**
+ * 创建任务前预检该任务类型依赖的组件是否就绪。
+ * store 中的组件状态可能过期，首次判为缺失时重新检测一次再定型，仍缺失则提示并返回 false。
+ * 后端创建接口仍会做最终校验，此处仅用于尽早引导用户。
+ */
+async function ensureTaskComponents(taskType: TaskType): Promise<boolean> {
+  if (componentStore.components.length === 0) {
+    await componentStore.loadComponents()
+  }
+  const judge = (): string[] => {
+    const missing: string[] = []
+    for (const ct of TASK_REQUIRED_COMPONENTS[taskType] ?? []) {
+      const comp = componentStore.getStatus(ct)
+      if (comp?.status !== 'installed') {
+        missing.push(comp?.name ?? ct)
+      }
+    }
+    return missing
+  }
+
+  let missingNames = judge()
+  if (missingNames.length > 0) {
+    // 缓存可能过期，重新检测一次避免误拦
+    await componentStore.loadComponents()
+    missingNames = judge()
+    if (missingNames.length > 0) {
+      ElMessage.warning(t('videos.component_missing', { list: missingNames.join('、') }))
+      return false
+    }
+  }
+  return true
+}
+
 async function handleSubtitle(video: Video): Promise<void> {
   if (isTaskRunning(video.subtitle_task)) return
+  if (!(await ensureTaskComponents('subtitle'))) return
   try {
     await createTask(video.id, 'subtitle')
     ElMessage.success(t('videos.subtitle.success'))
@@ -185,6 +250,7 @@ async function handleSubtitle(video: Video): Promise<void> {
 
 async function handleSubtitleBurn(video: Video): Promise<void> {
   if (isTaskRunning(video.subtitle_burn_task)) return
+  if (!(await ensureTaskComponents('subtitle_burn'))) return
 
   // 检测是否存在同名衍生视频（如去马赛克视频）；没有则直接对原视频执行
   const derived = (video.output_files || []).filter((f) => f.is_video && f.path)
@@ -215,6 +281,7 @@ async function handleSubtitleBurn(video: Video): Promise<void> {
 
 async function handleDeblur(video: Video): Promise<void> {
   if (isTaskRunning(video.deblur_task)) return
+  if (!(await ensureTaskComponents('deblur'))) return
   const successKey = 'videos.deblur.success'
   const titleKey = 'videos.dialog.deblur_title'
 
@@ -247,10 +314,19 @@ async function handleDeblur(video: Video): Promise<void> {
 
 async function handleUpscale(video: Video): Promise<void> {
   if (isTaskRunning(video.upscale_task)) return
+  if (!(await ensureTaskComponents('upscale'))) return
   try {
     const files = await listDirFiles(video.id)
     upscaleDialogVideo.value = video
-    upscaleDialogFiles.value = files
+    // 接口返回 file_type（snake_case），转换为弹窗所需的 fileType 字段
+    upscaleDialogFiles.value = files.map((f) => ({
+      name: f.name,
+      path: f.path,
+      width: f.width,
+      height: f.height,
+      size: f.size,
+      fileType: f.file_type,
+    }))
     upscaleDialogVisible.value = true
   } catch {
     // error handled by interceptor
@@ -258,13 +334,15 @@ async function handleUpscale(video: Video): Promise<void> {
 }
 
 // 弹窗确认：以用户选择的视频为处理源创建任务（path 为空串表示原视频）
-async function handleSourceConfirm(path: string): Promise<void> {
+// overwrite 表示是否覆盖所选的衍生视频（仅衍生视频时勾选出现）
+async function handleSourceConfirm(payload: { path: string; overwrite: boolean }): Promise<void> {
   const video = sourceDialogVideo.value
   if (!video) return
   const taskType = sourceDialogTaskType.value
+  if (!(await ensureTaskComponents(taskType as TaskType))) return
   sourceDialogVideo.value = null
   try {
-    await createTask(video.id, taskType as TaskType, path || undefined)
+    await createTask(video.id, taskType as TaskType, payload.path || undefined, payload.overwrite)
     if (taskType === 'deblur') {
       ElMessage.success(t('videos.deblur.success'))
     } else {
@@ -276,12 +354,12 @@ async function handleSourceConfirm(path: string): Promise<void> {
   }
 }
 
-async function handleUpscaleConfirm(payload: { sourcePath: string, targetWidth: number, targetHeight: number, processor: string, model: string, noiseLevel: number }): Promise<void> {
+async function handleUpscaleConfirm(payload: { sourcePath: string; targetWidth: number; targetHeight: number; processor: string; model: string; noiseLevel: number; overwrite: boolean }): Promise<void> {
   const video = upscaleDialogVideo.value
   if (!video) return
   upscaleDialogVideo.value = null
   try {
-    await createTask(video.id, 'upscale', payload.sourcePath, payload.targetWidth, payload.targetHeight, payload.processor, payload.model, payload.noiseLevel)
+    await createTask(video.id, 'upscale', payload.sourcePath, payload.overwrite, payload.targetWidth, payload.targetHeight, payload.processor, payload.model, payload.noiseLevel)
     ElMessage.success(t('videos.upscale.success'))
     await loadVideos()
   } catch {
@@ -352,6 +430,7 @@ function stopPolling(): void {
 
 onMounted(() => {
   settingsStore.init()
+  componentStore.loadComponents()
   loadVideos()
   startPolling()
 })
@@ -393,6 +472,16 @@ onUnmounted(() => {
 
       <div class="panel-toolbar">
         <div class="toolbar-left">
+          <el-button
+            type="danger"
+            size="small"
+            :disabled="selectedVideos.length === 0"
+            @click="handleBatchDelete"
+          >
+            <el-icon><Delete /></el-icon>{{ $t('videos.batch_delete') }}<span v-if="selectedVideos.length" class="batch-count">{{ selectedVideos.length }}</span>
+          </el-button>
+        </div>
+        <div class="toolbar-right">
           <div class="poll-control">
             <span class="vf-data-label">{{ $t('videos.polling.label') }}</span>
             <el-select v-model="pollingInterval" size="small" style="width: 110px" @change="handlePollingChange">
@@ -412,34 +501,26 @@ onUnmounted(() => {
         <el-table
           v-loading="loading"
           :data="videoList"
-          :row-key="getRowKey"
-          :tree-props="{ children: 'output_files' }"
-          :default-expand-all="defaultExpandAll"
           style="width: 100%"
           empty-text=""
+          @selection-change="handleSelectionChange"
         >
+          <el-table-column type="selection" width="45" />
+
           <el-table-column :label="$t('videos.column.name')" min-width="280">
             <template #default="{ row }">
-              <div class="name-cell" :class="{ 'name-cell--child': isOutputRow(row) }">
+              <div class="name-cell">
                 <span class="name-icon">
-                  <el-icon v-if="isOutputRow(row)"><Document /></el-icon>
-                  <el-icon v-else><VideoCamera /></el-icon>
+                  <el-icon><VideoCamera /></el-icon>
                 </span>
-                <span class="name-text" :title="row.name">{{ row.name }}</span>
+                <span class="name-text" :title="row.path">{{ row.name }}</span>
               </div>
             </template>
           </el-table-column>
 
           <el-table-column :label="$t('videos.column.type')" width="100">
-            <template #default="{ row }">
-              <template v-if="!isOutputRow(row)">
-                <el-tag type="primary" size="small">{{ $t('videos.type.video') }}</el-tag>
-              </template>
-              <template v-else>
-                <el-tag :type="getFileTypeTag(row as OutputFile)" size="small">
-                  {{ $t(getFileTypeLabel(row as OutputFile)) }}
-                </el-tag>
-              </template>
+            <template #default>
+              <el-tag type="primary" size="small">{{ $t('videos.type.video') }}</el-tag>
             </template>
           </el-table-column>
 
@@ -451,117 +532,79 @@ onUnmounted(() => {
 
           <el-table-column :label="$t('videos.column.subtitle')" width="100">
             <template #default="{ row }">
-              <template v-if="!isOutputRow(row)">
-                <div class="status-cell">
-                  <span :class="['vf-led', taskStatusLed((row as Video).subtitle_task)]"></span>
-                  <span class="status-text">{{ taskStatusText((row as Video).subtitle_task) }}</span>
-                </div>
-                <el-progress
-                  v-if="(row as Video).subtitle_task"
-                  :percentage="(row as Video).subtitle_task!.progress"
-                  :status="(row as Video).subtitle_task!.status === 'failed' ? 'exception' : (row as Video).subtitle_task!.status === 'completed' ? 'success' : ''"
-                  :stroke-width="4"
-                  class="signal-progress"
-                />
-              </template>
+              <div class="status-cell">
+                <span :class="['vf-led', taskStatusLed(row.subtitle_task)]"></span>
+                <span class="status-text">{{ taskStatusText(row.subtitle_task) }}</span>
+              </div>
             </template>
           </el-table-column>
 
           <el-table-column :label="$t('videos.column.subtitle_burn')" width="100">
             <template #default="{ row }">
-              <template v-if="!isOutputRow(row)">
-                <div class="status-cell">
-                  <span :class="['vf-led', taskStatusLed((row as Video).subtitle_burn_task)]"></span>
-                  <span class="status-text">{{ taskStatusText((row as Video).subtitle_burn_task) }}</span>
-                </div>
-                <el-progress
-                  v-if="(row as Video).subtitle_burn_task"
-                  :percentage="(row as Video).subtitle_burn_task!.progress"
-                  :status="(row as Video).subtitle_burn_task!.status === 'failed' ? 'exception' : (row as Video).subtitle_burn_task!.status === 'completed' ? 'success' : ''"
-                  :stroke-width="4"
-                  class="signal-progress"
-                />
-              </template>
+              <div class="status-cell">
+                <span :class="['vf-led', taskStatusLed(row.subtitle_burn_task)]"></span>
+                <span class="status-text">{{ taskStatusText(row.subtitle_burn_task) }}</span>
+              </div>
             </template>
           </el-table-column>
 
           <el-table-column :label="$t('videos.column.deblur')" width="100">
             <template #default="{ row }">
-              <template v-if="!isOutputRow(row)">
-                <div class="status-cell">
-                  <span :class="['vf-led', taskStatusLed((row as Video).deblur_task)]"></span>
-                  <span class="status-text">{{ taskStatusText((row as Video).deblur_task) }}</span>
-                </div>
-                <el-progress
-                  v-if="(row as Video).deblur_task"
-                  :percentage="(row as Video).deblur_task!.progress"
-                  :status="(row as Video).deblur_task!.status === 'failed' ? 'exception' : (row as Video).deblur_task!.status === 'completed' ? 'success' : ''"
-                  :stroke-width="4"
-                  class="signal-progress"
-                />
-              </template>
+              <div class="status-cell">
+                <span :class="['vf-led', taskStatusLed(row.deblur_task)]"></span>
+                <span class="status-text">{{ taskStatusText(row.deblur_task) }}</span>
+              </div>
             </template>
           </el-table-column>
 
           <el-table-column :label="$t('videos.column.upscale')" width="100">
             <template #default="{ row }">
-              <template v-if="!isOutputRow(row)">
-                <div class="status-cell">
-                  <span :class="['vf-led', taskStatusLed((row as Video).upscale_task)]"></span>
-                  <span class="status-text">{{ taskStatusText((row as Video).upscale_task) }}</span>
-                </div>
-                <el-progress
-                  v-if="(row as Video).upscale_task"
-                  :percentage="(row as Video).upscale_task!.progress"
-                  :status="(row as Video).upscale_task!.status === 'failed' ? 'exception' : (row as Video).upscale_task!.status === 'completed' ? 'success' : ''"
-                  :stroke-width="4"
-                  class="signal-progress"
-                />
-              </template>
+              <div class="status-cell">
+                <span :class="['vf-led', taskStatusLed(row.upscale_task)]"></span>
+                <span class="status-text">{{ taskStatusText(row.upscale_task) }}</span>
+              </div>
             </template>
           </el-table-column>
 
           <el-table-column :label="$t('videos.column.action')" width="350" fixed="right">
             <template #default="{ row }">
-              <template v-if="!isOutputRow(row)">
-                <el-button
-                  type="primary"
-                  size="small"
-                  :disabled="isTaskRunning((row as Video).subtitle_task)"
-                  :loading="(row as Video).subtitle_task?.status === 'running'"
-                  @click="handleSubtitle(row as Video)"
-                >
-                  {{ $t('videos.btn.subtitle') }}
-                </el-button>
-                <el-button
-                  type="primary"
-                  size="small"
-                  :disabled="isTaskRunning((row as Video).subtitle_burn_task)"
-                  :loading="(row as Video).subtitle_burn_task?.status === 'running'"
-                  @click="handleSubtitleBurn(row as Video)"
-                >
-                  {{ $t('videos.btn.subtitle_burn') }}
-                </el-button>
-                <el-button
-                  type="warning"
-                  size="small"
-                  :disabled="isTaskRunning((row as Video).deblur_task)"
-                  :loading="(row as Video).deblur_task?.status === 'running'"
-                  @click="handleDeblur(row as Video)"
-                >
-                  {{ $t('videos.btn.deblur') }}
-                </el-button>
-                <el-button
-                  type="success"
-                  size="small"
-                  :disabled="isTaskRunning((row as Video).upscale_task)"
-                  :loading="(row as Video).upscale_task?.status === 'running'"
-                  @click="handleUpscale(row as Video)"
-                >
-                  {{ $t('videos.btn.upscale') }}
-                </el-button>
-                <el-button type="danger" size="small" @click="handleDelete(row as Video)">{{ $t('videos.btn.delete') }}</el-button>
-              </template>
+              <el-button
+                type="primary"
+                size="small"
+                :disabled="isTaskRunning(row.subtitle_task)"
+                :loading="row.subtitle_task?.status === 'running'"
+                @click="handleSubtitle(row)"
+              >
+                {{ $t('videos.btn.subtitle') }}
+              </el-button>
+              <el-button
+                type="primary"
+                size="small"
+                :disabled="isTaskRunning(row.subtitle_burn_task)"
+                :loading="row.subtitle_burn_task?.status === 'running'"
+                @click="handleSubtitleBurn(row)"
+              >
+                {{ $t('videos.btn.subtitle_burn') }}
+              </el-button>
+              <el-button
+                type="warning"
+                size="small"
+                :disabled="isTaskRunning(row.deblur_task)"
+                :loading="row.deblur_task?.status === 'running'"
+                @click="handleDeblur(row)"
+              >
+                {{ $t('videos.btn.deblur') }}
+              </el-button>
+              <el-button
+                type="success"
+                size="small"
+                :disabled="isTaskRunning(row.upscale_task)"
+                :loading="row.upscale_task?.status === 'running'"
+                @click="handleUpscale(row)"
+              >
+                {{ $t('videos.btn.upscale') }}
+              </el-button>
+              <el-button type="danger" size="small" @click="handleDelete(row)">{{ $t('videos.btn.delete') }}</el-button>
             </template>
           </el-table-column>
 
@@ -636,12 +679,26 @@ onUnmounted(() => {
   border-bottom: 1px solid var(--vf-border);
   display: flex;
   align-items: center;
+  justify-content: space-between;
 }
 
 .toolbar-left {
   display: flex;
   align-items: center;
   gap: 14px;
+}
+
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.batch-count {
+  font-family: var(--vf-font-mono);
+  font-size: 11px;
+  margin-left: 4px;
+  opacity: 0.85;
 }
 
 .poll-control {
@@ -665,10 +722,6 @@ onUnmounted(() => {
   align-items: center;
   gap: 8px;
   overflow: hidden;
-}
-
-.name-cell--child {
-  padding-left: 28px;
 }
 
 .name-icon {
@@ -708,15 +761,6 @@ onUnmounted(() => {
 
 .signal-progress {
   margin-top: 1px;
-}
-
-/* 子行背景 */
-.panel-body--compact :deep(.el-table__body tr.el-table__row--level-1 td) {
-  background: var(--vf-bg-panel-hover);
-}
-
-.panel-body--compact :deep(.el-table__body tr.el-table__row--level-1:hover td) {
-  background: var(--vf-bg-elevated);
 }
 
 .panel-footer {

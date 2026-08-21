@@ -97,6 +97,11 @@ func main() {
 		log.Printf("已将 %d 个残留运行中任务标记为失败（原因：上次服务异常终止）", affected)
 	}
 
+	// 回填视频各任务类型状态字段（与最新任务记录对齐，兼容升级前的历史数据）
+	if err := model.VideoResyncAllTaskStatus(context.Background()); err != nil {
+		log.Printf("回填视频任务状态失败: %v", err)
+	}
+
 	if err := taskScheduler.Start(context.Background()); err != nil {
 		log.Fatalf("启动任务调度器失败: %v", err)
 	}

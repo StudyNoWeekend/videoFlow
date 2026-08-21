@@ -50,3 +50,9 @@ type VideoListRes struct {
 type VideoScanRes struct {
 	Scanned int `json:"scanned"`
 }
+
+// BatchDeleteRes 批量删除结果响应
+type BatchDeleteRes struct {
+	Deleted int `json:"deleted"`
+	Skipped int `json:"skipped"`
+}

@@ -118,13 +118,14 @@ func (l *VideoLogic) List(ctx context.Context, listReq *req.VideoListReq) (*res.
 
 	list := make([]*res.VideoRes, 0, len(videos))
 	for _, v := range videos {
+		outputDir := outputDirPath(ctx, v)
 		videoRes := videoModelToRes(v)
-		videoRes.SubtitleTask = taskSnapshotByVideoIDAndType(ctx, v.ID, model.TaskTypeSubtitle)
-		videoRes.SubtitleBurnTask = taskSnapshotByVideoIDAndType(ctx, v.ID, model.TaskTypeSubtitleBurn)
-		videoRes.DeblurTask = taskSnapshotByVideoIDAndType(ctx, v.ID, model.TaskTypeDeblur)
-		videoRes.UpscaleTask = taskSnapshotByVideoIDAndType(ctx, v.ID, model.TaskTypeUpscale)
-		videoRes.OutputDir = outputDirPath(v)
-		videoRes.OutputFiles = listOutputFiles(v)
+		videoRes.SubtitleTask = taskSnapshotByVideoIDAndType(v, model.TaskTypeSubtitle)
+		videoRes.SubtitleBurnTask = taskSnapshotByVideoIDAndType(v, model.TaskTypeSubtitleBurn)
+		videoRes.DeblurTask = taskSnapshotByVideoIDAndType(v, model.TaskTypeDeblur)
+		videoRes.UpscaleTask = taskSnapshotByVideoIDAndType(v, model.TaskTypeUpscale)
+		videoRes.OutputDir = outputDir
+		videoRes.OutputFiles = listOutputFiles(ctx, outputDir, v)
 		list = append(list, videoRes)
 	}
 
@@ -177,6 +178,48 @@ func (l *VideoLogic) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
+// BatchDelete 批量删除视频记录，可选同时删除对应输出目录。
+// 不存在的记录跳过，部分失败不中断整体流程。
+func (l *VideoLogic) BatchDelete(ctx context.Context, deleteReq *req.VideoBatchDeleteReq) (*res.BatchDeleteRes, error) {
+	seen := make(map[string]struct{}, len(deleteReq.IDs))
+	result := &res.BatchDeleteRes{}
+	for _, id := range deleteReq.IDs {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+
+		video, err := model.VideoGetByID(ctx, id)
+		if err != nil {
+			return nil, enum.ErrDatabase.WithMsg(fmt.Sprintf("查询视频失败: %v", err))
+		}
+		if video == nil {
+			result.Skipped++
+			continue
+		}
+
+		if deleteReq.DeleteFiles {
+			outputDir := model.VideoOutputDir(ctx, video)
+			if err := os.RemoveAll(outputDir); err != nil {
+				logger.Logger.Warn("删除视频输出目录失败",
+					zap.String("path", outputDir),
+					zap.Error(err),
+				)
+			}
+		}
+
+		if err := model.VideoDelete(ctx, id); err != nil {
+			if err == gorm.ErrRecordNotFound {
+				result.Skipped++
+				continue
+			}
+			return nil, enum.ErrDatabase.WithMsg(fmt.Sprintf("删除视频失败: %v", err))
+		}
+		result.Deleted++
+	}
+	return result, nil
+}
+
 // videoModelToRes 将视频模型转换为响应结构
 func videoModelToRes(v *model.Video) *res.VideoRes {
 	return &res.VideoRes{
@@ -218,18 +261,29 @@ func getVideoResolution(ctx context.Context, path string) (int, int) {
 	return w, h
 }
 
-// taskSnapshotByVideoIDAndType 查询并转换指定视频的最新指定类型任务快照
-func taskSnapshotByVideoIDAndType(ctx context.Context, videoID, taskType string) *res.TaskSnapshotRes {
-	task, err := model.TaskGetLatestByVideoIDAndType(ctx, videoID, taskType)
-	if err != nil || task == nil {
+// taskSnapshotByVideoIDAndType 返回视频指定任务类型的状态快照。
+// 状态以 videos 表对应字段为准（由任务生命周期同步维护），不再依赖输出文件判断。
+func taskSnapshotByVideoIDAndType(video *model.Video, taskType string) *res.TaskSnapshotRes {
+	status := videoTaskStatus(video, taskType)
+	if status == "" {
 		return nil
 	}
-	return &res.TaskSnapshotRes{
-		ID:        task.ID,
-		Status:    task.Status,
-		Progress:  task.Progress,
-		ErrorMsg:  task.ErrorMsg,
-		UpdatedAt: task.UpdatedAt,
+	return &res.TaskSnapshotRes{Status: status}
+}
+
+// videoTaskStatus 读取视频表存储的指定任务类型状态字段
+func videoTaskStatus(video *model.Video, taskType string) string {
+	switch taskType {
+	case model.TaskTypeSubtitle:
+		return video.SubtitleStatus
+	case model.TaskTypeSubtitleBurn:
+		return video.SubtitleBurnStatus
+	case model.TaskTypeDeblur, model.TaskTypeRepair:
+		return video.DeblurStatus
+	case model.TaskTypeUpscale:
+		return video.UpscaleStatus
+	default:
+		return ""
 	}
 }
 
@@ -245,16 +299,13 @@ func isVideoOutputDir(dirPath string) bool {
 	return false
 }
 
-// outputDirPath 返回视频文件的同名输出目录路径
-func outputDirPath(v *model.Video) string {
-	videoExt := filepath.Ext(v.Path)
-	baseName := strings.TrimSuffix(v.Name, videoExt)
-	return filepath.Join(filepath.Dir(v.Path), baseName)
+// outputDirPath 返回视频的输出目录（集中计算逻辑见 model.VideoOutputDir）
+func outputDirPath(ctx context.Context, v *model.Video) string {
+	return model.VideoOutputDir(ctx, v)
 }
 
 // listOutputFiles 读取视频输出目录中的文件列表，并分类标记文件类型
-func listOutputFiles(v *model.Video) []*res.OutputFileRes {
-	outputDir := outputDirPath(v)
+func listOutputFiles(ctx context.Context, outputDir string, v *model.Video) []*res.OutputFileRes {
 	entries, err := os.ReadDir(outputDir)
 	if err != nil {
 		return nil
@@ -306,7 +357,7 @@ func (l *VideoLogic) DirFiles(ctx context.Context, videoID string) ([]*DirFileIn
 		return nil, enum.ErrNotFound
 	}
 
-	outputDir := outputDirPath(video)
+	outputDir := outputDirPath(ctx, video)
 	files := make([]*DirFileInfo, 0)
 
 	// 把原始视频加入候选列表

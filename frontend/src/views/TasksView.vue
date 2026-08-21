@@ -2,7 +2,7 @@
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useI18n } from 'vue-i18n'
-import { listTasks, retryTask, cancelTask, deleteTask } from '@/api/task'
+import { listTasks, retryTask, cancelTask, deleteTask, batchDeleteTasks } from '@/api/task'
 import type { Task, TaskType } from '@/api/task'
 import { formatTime } from '@/utils/format'
 
@@ -14,6 +14,9 @@ const page = ref<number>(1)
 const pageSize = ref<number>(10)
 const total = ref<number>(0)
 let pollTimer: number | null = null
+
+// 多选批量删除
+const selectedTasks = ref<Task[]>([])
 
 // 轮询间隔选项（毫秒），空字符串表示不轮询
 const pollingOptions = [
@@ -78,19 +81,35 @@ async function handleRetry(task: Task): Promise<void> {
 }
 
 async function handleDelete(task: Task): Promise<void> {
+  // 确认弹窗提供“同时删除对应输出文件”勾选框，由用户决定删除范围
+  const checkboxId = 'task-delete-files-' + task.id
+  let confirmed = false
   try {
     await ElMessageBox.confirm(
-      t('tasks.delete.confirm'),
+      `<p style="margin: 0 0 12px;">${t('tasks.delete.confirm')}</p>
+       <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px;">
+         <input id="${checkboxId}" type="checkbox" style="accent-color: var(--vf-accent, #409eff);" />
+         ${t('tasks.delete.delete_files_label')}
+       </label>`,
       t('common.notice'),
-      { confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel'), type: 'warning' }
+      { dangerouslyUseHTMLString: true, confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel'), type: 'warning' }
     )
-    await deleteTask(task.id)
-    ElMessage.success(t('tasks.delete.success'))
-    await loadTasks()
+    confirmed = true
   } catch (error) {
+    confirmed = false
     if (error !== 'cancel') {
       // 非取消操作
     }
+  }
+  if (!confirmed) return
+
+  const deleteFiles = (document.getElementById(checkboxId) as HTMLInputElement | null)?.checked ?? false
+  try {
+    await deleteTask(task.id, deleteFiles)
+    ElMessage.success(t('tasks.delete.success'))
+    await loadTasks()
+  } catch {
+    // 请求失败已由拦截器提示
   }
 }
 
@@ -109,6 +128,47 @@ async function handleCancel(task: Task): Promise<void> {
     if (error !== 'cancel') {
       // 非取消操作
     }
+  }
+}
+
+function handleSelectionChange(rows: Task[]): void {
+  selectedTasks.value = rows
+}
+
+async function handleBatchDelete(): Promise<void> {
+  const ids = selectedTasks.value.map((task) => task.id)
+  if (ids.length === 0) return
+
+  // 确认弹窗提供“同时删除对应输出文件”勾选框
+  const checkboxId = 'tasks-batch-delete-files'
+  let confirmed = false
+  try {
+    await ElMessageBox.confirm(
+      `<p style="margin: 0 0 12px;">${t('tasks.batch_delete.confirm', { count: ids.length })}</p>
+       <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px;">
+         <input id="${checkboxId}" type="checkbox" style="accent-color: var(--vf-accent, #409eff);" />
+         ${t('tasks.batch_delete.delete_files_label')}
+       </label>`,
+      t('common.notice'),
+      { dangerouslyUseHTMLString: true, confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel'), type: 'warning' }
+    )
+    confirmed = true
+  } catch (error) {
+    confirmed = false
+    if (error !== 'cancel') {
+      // 非取消操作
+    }
+  }
+  if (!confirmed) return
+
+  const deleteFiles = (document.getElementById(checkboxId) as HTMLInputElement | null)?.checked ?? false
+  try {
+    const res = await batchDeleteTasks(ids, deleteFiles)
+    ElMessage.success(t('tasks.batch_delete.success', { deleted: res.deleted, skipped: res.skipped }))
+    selectedTasks.value = []
+    await loadTasks()
+  } catch {
+    // 请求失败已由拦截器提示
   }
 }
 
@@ -227,14 +287,23 @@ onUnmounted(() => {
       </div>
 
       <div class="panel-toolbar">
-        <el-radio-group v-model="activeType" @change="handleTypeChange">
-          <el-radio-button label="">{{ $t('tasks.filter.all') }}</el-radio-button>
-          <el-radio-button label="subtitle">{{ $t('tasks.filter.subtitle') }}</el-radio-button>
-          <el-radio-button label="subtitle_burn">{{ $t('tasks.filter.subtitle_burn') }}</el-radio-button>
-          <el-radio-button label="deblur">{{ $t('tasks.filter.deblur') }}</el-radio-button>
-          <el-radio-button label="upscale">{{ $t('tasks.filter.upscale') }}</el-radio-button>
-        </el-radio-group>
-
+        <div class="toolbar-left">
+          <el-button
+            type="danger"
+            size="small"
+            :disabled="selectedTasks.length === 0"
+            @click="handleBatchDelete"
+          >
+            <el-icon><Delete /></el-icon>{{ $t('tasks.batch_delete') }}<span v-if="selectedTasks.length" class="batch-count">{{ selectedTasks.length }}</span>
+          </el-button>
+          <el-radio-group v-model="activeType" @change="handleTypeChange">
+            <el-radio-button label="">{{ $t('tasks.filter.all') }}</el-radio-button>
+            <el-radio-button label="subtitle">{{ $t('tasks.filter.subtitle') }}</el-radio-button>
+            <el-radio-button label="subtitle_burn">{{ $t('tasks.filter.subtitle_burn') }}</el-radio-button>
+            <el-radio-button label="deblur">{{ $t('tasks.filter.deblur') }}</el-radio-button>
+            <el-radio-button label="upscale">{{ $t('tasks.filter.upscale') }}</el-radio-button>
+          </el-radio-group>
+        </div>
         <div class="toolbar-right">
           <div class="poll-control">
             <span class="vf-data-label">{{ $t('tasks.polling.label') }}</span>
@@ -255,7 +324,13 @@ onUnmounted(() => {
       </div>
 
       <div class="panel-body panel-body--compact">
-        <el-table v-loading="loading" :data="taskList" style="width: 100%">
+        <el-table
+          v-loading="loading"
+          :data="taskList"
+          style="width: 100%"
+          @selection-change="handleSelectionChange"
+        >
+          <el-table-column type="selection" width="45" />
           <el-table-column :label="$t('tasks.column.id')" width="130">
             <template #default="{ row }">
               <span class="task-id">#{{ row.id.slice(-8).toUpperCase() }}</span>
@@ -407,10 +482,23 @@ onUnmounted(() => {
   justify-content: space-between;
 }
 
+.toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
 .toolbar-right {
   display: flex;
   align-items: center;
   gap: 14px;
+}
+
+.batch-count {
+  font-family: var(--vf-font-mono);
+  font-size: 11px;
+  margin-left: 4px;
+  opacity: 0.85;
 }
 
 .poll-control {

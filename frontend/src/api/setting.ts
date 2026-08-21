@@ -3,6 +3,7 @@ import request, { type ApiResponse } from './request'
 // 统一设置响应/请求对象
 export interface Setting {
   video_dir: string
+  output_dir: string
   scan_interval: number
   asr_url: string
   asr_language: string
