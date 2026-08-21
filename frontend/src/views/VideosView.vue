@@ -5,7 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { listVideos, scanVideos, deleteVideo, batchDeleteVideos, listDirFiles } from '@/api/video'
 import { createTask, TASK_REQUIRED_COMPONENTS } from '@/api/task'
 import type { TaskType } from '@/api/task'
-import type { Video, TaskSnapshot, OutputFile } from '@/api/video'
+import type { Video, TaskSnapshot, DirFile } from '@/api/video'
 import SourceSelectDialog, { type SourceSelectOption } from '@/components/SourceSelectDialog.vue'
 import UpscaleDialog from '@/components/UpscaleDialog.vue'
 import { useSettingsStore } from '@/stores/settings'
@@ -23,6 +23,9 @@ const videoList = ref<Video[]>([])
 const page = ref<number>(1)
 const pageSize = ref<number>(12)
 const total = ref<number>(0)
+// 大小列排序状态（服务端分页排序，空串表示默认按更新时间倒序）
+const sortBy = ref<string>('')
+const sortOrder = ref<'asc' | 'desc' | ''>('')
 let pollTimer: number | null = null
 
 // 多选批量删除
@@ -53,7 +56,7 @@ const pollingInterval = ref<number>(0)
 async function loadVideos(): Promise<void> {
   loading.value = true
   try {
-    const res = await listVideos(page.value, pageSize.value)
+    const res = await listVideos(page.value, pageSize.value, sortBy.value || undefined, sortOrder.value || undefined)
     videoList.value = res.list
     total.value = res.total
     page.value = res.page
@@ -66,7 +69,7 @@ async function loadVideos(): Promise<void> {
 // 轮询时只更新进度条、状态、错误信息，保持现有数据
 async function pollVideos(): Promise<void> {
   try {
-    const res = await listVideos(page.value, pageSize.value)
+    const res = await listVideos(page.value, pageSize.value, sortBy.value || undefined, sortOrder.value || undefined)
     for (const incoming of res.list) {
       const existing = videoList.value.find((v) => v.id === incoming.id)
       if (existing) {
@@ -248,12 +251,23 @@ async function handleSubtitle(video: Video): Promise<void> {
   }
 }
 
+// 点击非字幕任务时实时扫描输出目录中的衍生视频（含历史/旧版本产物），
+// 用作处理源选择；不依赖视频列表缓存快照，扫描失败按“无衍生视频”处理
+async function loadDerivedVideos(video: Video): Promise<DirFile[]> {
+  try {
+    const files = await listDirFiles(video.id)
+    return files.filter((f) => f.file_type !== 'original' && f.path)
+  } catch {
+    return []
+  }
+}
+
 async function handleSubtitleBurn(video: Video): Promise<void> {
   if (isTaskRunning(video.subtitle_burn_task)) return
   if (!(await ensureTaskComponents('subtitle_burn'))) return
 
-  // 检测是否存在同名衍生视频（如去马赛克视频）；没有则直接对原视频执行
-  const derived = (video.output_files || []).filter((f) => f.is_video && f.path)
+  // 实时扫描输出目录中的衍生视频（如去马赛克/清晰度修复视频）；没有则直接对原视频执行
+  const derived = await loadDerivedVideos(video)
   if (derived.length === 0) {
     try {
       await createTask(video.id, 'subtitle_burn')
@@ -271,7 +285,7 @@ async function handleSubtitleBurn(video: Video): Promise<void> {
   sourceDialogTaskType.value = 'subtitle_burn'
   sourceDialogOptions.value = derived.map((f) => ({
     name: f.name,
-    path: f.path!,
+    path: f.path,
     size: f.size,
     labelKey: getFileTypeLabel(f),
     tag: getFileTypeTag(f),
@@ -285,8 +299,8 @@ async function handleDeblur(video: Video): Promise<void> {
   const successKey = 'videos.deblur.success'
   const titleKey = 'videos.dialog.deblur_title'
 
-  // 检测是否存在同名衍生视频（如字幕合成视频）；没有则直接对原视频执行
-  const derived = (video.output_files || []).filter((f) => f.is_video && f.path)
+  // 实时扫描输出目录中的衍生视频（如字幕合成视频）；没有则直接对原视频执行
+  const derived = await loadDerivedVideos(video)
   if (derived.length === 0) {
     try {
       await createTask(video.id, 'deblur')
@@ -304,7 +318,7 @@ async function handleDeblur(video: Video): Promise<void> {
   sourceDialogTaskType.value = 'deblur'
   sourceDialogOptions.value = derived.map((f) => ({
     name: f.name,
-    path: f.path!,
+    path: f.path,
     size: f.size,
     labelKey: getFileTypeLabel(f),
     tag: getFileTypeTag(f),
@@ -389,11 +403,11 @@ function taskStatusText(task?: TaskSnapshot): string {
 		  unknown:         { label: 'videos.file.unknown',         tag: 'info' },
 		}
 
-function getFileTypeLabel(file: OutputFile): string {
+function getFileTypeLabel(file: { file_type: string }): string {
   return fileTypeLabels[file.file_type]?.label ?? 'videos.file.unknown'
 }
 
-function getFileTypeTag(file: OutputFile): string {
+function getFileTypeTag(file: { file_type: string }): string {
   return fileTypeLabels[file.file_type]?.tag ?? 'info'
 }
 
@@ -404,6 +418,14 @@ function handlePageChange(currentPage: number): void {
 
 function handleSizeChange(size: number): void {
   pageSize.value = size
+  page.value = 1
+  loadVideos()
+}
+
+// 大小列排序：点击表头上下 icon 切换正序/倒序，order 为 null 时恢复默认排序
+function handleSortChange({ prop, order }: { prop: string; order: string | null }): void {
+  sortBy.value = prop === 'size' ? 'size' : ''
+  sortOrder.value = order === 'ascending' ? 'asc' : order === 'descending' ? 'desc' : ''
   page.value = 1
   loadVideos()
 }
@@ -524,7 +546,14 @@ onUnmounted(() => {
             </template>
           </el-table-column>
 
-          <el-table-column :label="$t('videos.column.size')" width="110">
+          <el-table-column
+            :label="$t('videos.column.size')"
+            prop="size"
+            sortable="custom"
+            :sort-orders="['ascending', 'descending']"
+            width="110"
+            @sort-change="handleSortChange"
+          >
             <template #default="{ row }">
               <span class="size-value">{{ formatFileSize(row.size) }}</span>
             </template>

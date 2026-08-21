@@ -707,16 +707,35 @@ func (s *TaskScheduler) processSubtitleBurnTask(ctx context.Context, task *model
 	}
 	s.updateProgress(ctx, task.ID, 20, "正在获取视频信息")
 
-	// 2. 检查输出目录中是否已有字幕文件：
-	//    - 有 srt：直接烧录；
-	//    - 无 srt：先自动执行字幕生成（提取音频 -> ASR -> 写 SRT），再烧录。
+	// 2. 按「数据库记录 -> 输出目录文件 -> 自动生成」的顺序查找字幕文件：
+	//    - 数据库有已完成字幕任务且 srt 文件仍在：直接使用；
+	//    - 记录缺失或文件已不存在（任务被删除/旧版本产物）：再查输出目录中是否有 srt；
+	//    - 仍找不到：自动生成字幕（提取音频 -> ASR -> 写 SRT），随后烧录。
 	outputDir := model.VideoOutputDir(ctx, video)
 	baseName := model.VideoBaseName(video)
 	srtFilePath := filepath.Join(outputDir, baseName+".srt")
 
+	// 第一步：优先按数据库记录判断（最新字幕任务已完成即视为存在，再校验文件是否仍在）
+	srtFound := false
+	subTask, err := model.TaskGetLatestByVideoIDAndType(ctx, video.ID, model.TaskTypeSubtitle)
+	if err == nil && subTask != nil && subTask.Status == model.TaskStatusCompleted {
+		if _, statErr := os.Stat(srtFilePath); statErr == nil {
+			srtFound = true
+			s.updateProgress(ctx, task.ID, 50, "检测到已完成的字幕任务，正在将字幕写入视频")
+		}
+	}
+
+	// 第二步：数据库无完成记录（如任务被删除）或文件已不存在，再查输出目录
+	if !srtFound {
+		if _, statErr := os.Stat(srtFilePath); statErr == nil {
+			srtFound = true
+			s.updateProgress(ctx, task.ID, 50, "在输出目录中检测到字幕文件，正在将字幕写入视频")
+		}
+	}
+
 	burnStart := 50
-	if _, err := os.Stat(srtFilePath); err != nil {
-		// 未检测到字幕文件，自动生成字幕
+	if !srtFound {
+		// 第三步：仍没有字幕文件，自动生成字幕
 		if bootstrap.ASRProvider == nil {
 			s.markFailed(ctx, task, fmt.Errorf("未检测到字幕文件，且语音识别组件未就绪，无法自动生成字幕"))
 			return
@@ -757,8 +776,6 @@ func (s *TaskScheduler) processSubtitleBurnTask(ctx context.Context, task *model
 		}
 		s.updateProgress(ctx, task.ID, 95, "字幕文件生成完成，正在准备写入视频")
 		burnStart = 95
-	} else {
-		s.updateProgress(ctx, task.ID, 50, "字幕文件已找到，正在将字幕写入视频")
 	}
 
 	// 3. 确定实际处理源文件：优先使用用户选择的衍生视频（如去马赛克视频），否则为原视频

@@ -111,6 +111,8 @@ func (l *VideoLogic) List(ctx context.Context, listReq *req.VideoListReq) (*res.
 	videos, total, err := model.VideoList(ctx, &model.VideoListQuery{
 		Page:     listReq.Page,
 		PageSize: listReq.PageSize,
+		SortBy:   listReq.SortBy,
+		Order:    listReq.Order,
 	})
 	if err != nil {
 		return nil, enum.ErrDatabase.WithMsg(fmt.Sprintf("查询视频列表失败: %v", err))

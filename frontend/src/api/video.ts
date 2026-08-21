@@ -74,11 +74,18 @@ export function scanVideos(path?: string): Promise<ScanRes> {
  * 分页查询视频列表
  * @param page 页码
  * @param pageSize 每页数量
+ * @param sortBy 排序字段，目前支持 'size'；为空时后端按更新时间倒序
+ * @param order 排序方向：'asc' 正序 / 'desc' 倒序
  */
-export function listVideos(page: number, pageSize: number): Promise<VideoListRes> {
+export function listVideos(
+  page: number,
+  pageSize: number,
+  sortBy?: string,
+  order?: 'asc' | 'desc',
+): Promise<VideoListRes> {
   return request
     .get<ApiResponse<VideoListRes>>('/api/v1/videos', {
-      params: { page, page_size: pageSize },
+      params: { page, page_size: pageSize, sort_by: sortBy, order },
     })
     .then((res) => res.data.data)
 }

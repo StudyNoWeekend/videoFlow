@@ -134,6 +134,10 @@ func VideoUpsertByPath(ctx context.Context, path string, size int64, duration in
 type VideoListQuery struct {
 	Page     int
 	PageSize int
+	// SortBy 排序字段（白名单：size）；为空时按更新时间倒序
+	SortBy string
+	// Order 排序方向：asc / desc
+	Order string
 }
 
 // VideoListAll 查询所有未软删除的视频记录
@@ -145,7 +149,7 @@ func VideoListAll(ctx context.Context) ([]*Video, error) {
 	return videos, nil
 }
 
-// VideoList 分页查询视频列表，按更新时间倒序
+// VideoList 分页查询视频列表，默认按更新时间倒序，支持指定字段排序
 func VideoList(ctx context.Context, query *VideoListQuery) ([]*Video, int64, error) {
 	page := query.Page
 	pageSize := query.PageSize
@@ -167,10 +171,25 @@ func VideoList(ctx context.Context, query *VideoListQuery) ([]*Video, int64, err
 
 	var videos []*Video
 	offset := (page - 1) * pageSize
-	if err := db.Order("updated_at DESC, id DESC").Offset(offset).Limit(pageSize).Find(&videos).Error; err != nil {
+	if err := db.Order(videoOrderClause(query.SortBy, query.Order)).Offset(offset).Limit(pageSize).Find(&videos).Error; err != nil {
 		return nil, 0, fmt.Errorf("查询视频列表失败: %w", err)
 	}
 	return videos, total, nil
+}
+
+// videoOrderClause 根据排序字段与方向生成 ORDER BY 子句。
+// 排序字段必须来自白名单，避免 SQL 注入；未匹配时回退到更新时间倒序。
+func videoOrderClause(sortBy, order string) string {
+	dir := "DESC"
+	if strings.EqualFold(order, "asc") {
+		dir = "ASC"
+	}
+	switch sortBy {
+	case "size":
+		return "size " + dir + ", id DESC"
+	default:
+		return "updated_at DESC, id DESC"
+	}
 }
 
 // VideoGetByID 根据 ID 查询视频记录
