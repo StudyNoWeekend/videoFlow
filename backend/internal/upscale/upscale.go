@@ -326,7 +326,7 @@ const gpuSpec = `all,"capabilities=compute,video"`
 //     （amd64 镜像在 Apple Silicon 上由 QEMU 模拟，只有 llvmpipe 软件渲染器可用）
 //   - mps / xpu：video2x 不支持 MPS（Metal），Linux 容器内也无从访问 Apple/Intel GPU，
 //     配置值不会传入命令，等同于 CPU 运行，设置页已不再提供这两个选项
-func buildRunArgs(cfg Config, containerName, hostParentDir, inputFile, outputFile string) []string {
+func buildRunArgs(cfg Config, containerName, hostParentDir, inputFile, outputFile string, targetWidth, targetHeight int) []string {
 	args := []string{"run", "--rm"}
 	if strings.HasPrefix(cfg.Device, "cuda") {
 		args = append(args, "--gpus", gpuSpec)
@@ -349,10 +349,8 @@ func buildRunArgs(cfg Config, containerName, hostParentDir, inputFile, outputFil
 		if model != "" {
 			args = append(args, "--libplacebo-shader", model)
 		}
-		if cfg.Factor > 0 {
-			// For libplacebo, factor can be used as an alternative fallback;
-			// primary usage is -w / -h for exact dimensions.
-			// video2x supports -w / -h for libplacebo output resolution.
+		if targetWidth > 0 && targetHeight > 0 {
+			args = append(args, "-w", strconv.Itoa(targetWidth), "-h", strconv.Itoa(targetHeight))
 		}
 	default:
 		// realesrgan / realcugan
@@ -383,7 +381,7 @@ func gpuFailureHint(output string) string {
 	return ""
 }
 
-// modelFailureHint 识别“镜像内模型缺失 / 放大倍数不支持”类错误，
+// modelFailureHint 识别"镜像内模型缺失 / 放大倍数不支持"类错误，
 // 返回附加到错误信息的中文提示。
 func modelFailureHint(output, model string, factor int) string {
 	if strings.Contains(output, "model param file not found") {
@@ -585,16 +583,26 @@ func (e *Executor) Execute(ctx context.Context, videoPath string, targetWidth, t
 	// 用文件（净化后的）名称作为容器名称，方便识别。
 	containerName := sanitizeContainerName(baseName, videoPath) + "_upscale"
 
-	// 根据源视频分辨率推导整数放大倍数，使 -s 与创建任务时选择的“×2/×3/×4”一致。
+	// 根据源视频分辨率推导整数放大倍数，使 -s 与创建任务时选择的"×2/×3/×4"一致。
 	// 此前固定使用配置默认倍数（2），会导致实际倍数与用户选择不符，
-	// 并可能因模型仅有 ×4 版本而报“模型文件缺失”。探测失败时回退默认倍数。
-	if srcW, srcH, perr := probeResolution(ctx, videoPath); perr == nil && srcW > 0 && srcH > 0 {
-		if fw, fh := targetWidth/srcW, targetHeight/srcH; fw == fh && fw >= 2 && fw <= 4 {
-			cfg.Factor = fw
+	// 并可能因模型仅有 ×4 版本而报"模型文件缺失"。探测失败时回退默认倍数。
+	if cfg.Processor != "libplacebo" {
+		if srcW, srcH, perr := probeResolution(ctx, videoPath); perr == nil && srcW > 0 && srcH > 0 {
+			fw, fh := targetWidth/srcW, targetHeight/srcH
+			if fw == fh {
+				if fw >= 2 && fw <= 4 {
+					cfg.Factor = fw
+				} else {
+					return "", fmt.Errorf("分辨率 %dx%d 不适用 ×%d 缩放（%s 仅支持 ×2~×4）", srcW, srcH, fw, cfg.Processor)
+				}
+			} else {
+				return "", fmt.Errorf("分辨率 %dx%d 无法通过 %s 缩放至 %dx%d（目标/源宽高比不一致，%s 仅支持整数倍缩放）",
+					srcW, srcH, cfg.Processor, targetWidth, targetHeight, cfg.Processor)
+			}
 		}
 	}
 
-	args := buildRunArgs(cfg, containerName, hostParentDir, baseName, outFile)
+	args := buildRunArgs(cfg, containerName, hostParentDir, baseName, outFile, targetWidth, targetHeight)
 
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	out, err := streamCommand(cmd, onProgress)

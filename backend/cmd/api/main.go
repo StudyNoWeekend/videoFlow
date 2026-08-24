@@ -138,7 +138,11 @@ func main() {
 
 	log.Println("正在关闭服务...")
 
-	// 1. 将所有 running 状态的任务标记为失败
+	// 1. 先停止调度器，让 worker 不再认领新任务，但已 running 的任务继续执行
+	taskScheduler.Stop()
+
+	// 2. 所有 worker 已完成（或 context 已 cancel），再将 running 任务标记为失败
+	//    （先停调度器再标失败，避免 worker 落定终态覆盖"程序重启"标记）
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 
@@ -148,18 +152,20 @@ func main() {
 		log.Printf("已将 %d 个运行中任务标记为失败（原因：程序重启）", affected)
 	}
 
-	// 2. 关闭 HTTP 服务
+	// 3. 标记完任务后再全量回填视频状态字段（确保重启后视频徽标准确）
+	if err := model.VideoResyncAllTaskStatus(shutdownCtx); err != nil {
+		log.Printf("回填视频任务状态失败: %v", err)
+	}
+
+	// 4. 关闭 HTTP 服务
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("HTTP 服务关闭异常: %v", err)
 	}
 
-	// 3. 停止任务调度器
-	taskScheduler.Stop()
-
-	// 4. 停止视频目录扫描器
+	// 5. 停止视频目录扫描器
 	videoScanner.Stop()
 
-	// 5. 关闭数据库连接
+	// 6. 关闭数据库连接
 	if model.DB != nil {
 		if sqlDB, err := model.DB.DB(); err == nil {
 			sqlDB.Close()

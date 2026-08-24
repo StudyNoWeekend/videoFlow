@@ -55,6 +55,13 @@ func (l *TaskLogic) CreateTask(ctx context.Context, createReq *req.TaskCreateReq
 		return nil, componentMissingErr(missing)
 	}
 
+	// 防重复提交：同一视频不允许同时存在同类型的 pending/running/cancelling 任务
+	if exists, err := model.TaskExistsPendingOrRunningByVideoAndType(ctx, createReq.VideoID, createReq.TaskType); err != nil {
+		return nil, enum.ErrDatabase.WithMsg(fmt.Sprintf("查重失败: %v", err))
+	} else if exists {
+		return nil, enum.ErrTaskDuplicate
+	}
+
 	task := &model.Task{
 		VideoID:    video.ID,
 		TaskType:   createReq.TaskType,
@@ -85,23 +92,24 @@ func (l *TaskLogic) CreateTask(ctx context.Context, createReq *req.TaskCreateReq
 // 为空或等于关联视频本身时视为使用原视频；否则必须为存在且位于该视频
 // 同名输出目录内的视频文件（即由该视频生成的衍生视频，如字幕合成视频）。
 func (l *TaskLogic) validateSourcePath(ctx context.Context, video *model.Video, sourcePath string) (string, error) {
-	if sourcePath == "" || sourcePath == video.Path {
+	cleaned := filepath.Clean(sourcePath)
+	if cleaned == "" || cleaned == filepath.Clean(video.Path) {
 		return "", nil
 	}
 
-	if !model.IsVideoFile(sourcePath) {
+	if !model.IsVideoFile(cleaned) {
 		return "", enum.ErrInvalidParam.WithMsg("处理源必须是视频文件")
 	}
-	if _, err := os.Stat(sourcePath); err != nil {
+	if _, err := os.Stat(cleaned); err != nil {
 		return "", enum.ErrInvalidParam.WithMsg("处理源文件不存在")
 	}
 
 	// 仅允许原视频输出目录内的衍生视频，避免把任务指向任意路径
-	outputDir := model.VideoOutputDir(ctx, video)
-	if filepath.Dir(sourcePath) != outputDir {
+	outputDir := filepath.Clean(model.VideoOutputDir(ctx, video))
+	if filepath.Dir(cleaned) != outputDir {
 		return "", enum.ErrInvalidParam.WithMsg("处理源文件必须是原视频的衍生视频")
 	}
-	return sourcePath, nil
+	return cleaned, nil
 }
 
 // componentMissingErr 将未就绪组件列表转换为业务错误，提示用户先到组件管理安装/配置
@@ -247,33 +255,41 @@ func (l *TaskLogic) DeleteTask(ctx context.Context, taskID string, deleteFiles b
 		return enum.ErrInvalidParam
 	}
 
-	task, err := model.TaskGetByID(ctx, taskID)
-	if err != nil {
-		return enum.ErrDatabase.WithMsg(fmt.Sprintf("查询任务失败: %v", err))
-	}
-	if task == nil {
-		return enum.ErrTaskNotFound
-	}
-	if task.Status == model.TaskStatusRunning {
-		return enum.ErrTaskRunningCannotDelete
-	}
-
-	err = model.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	var delTask *model.Task
+	err := model.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		task, err := model.TaskGetByIDTx(tx, taskID)
+		if err != nil {
+			return err
+		}
+		if task == nil {
+			return gorm.ErrRecordNotFound
+		}
+		if task.Status == model.TaskStatusRunning || task.Status == model.TaskStatusCancelling {
+			return enum.ErrTaskRunningCannotDelete
+		}
 		if err := model.TaskDeleteTx(tx, taskID); err != nil {
 			return err
 		}
 		// 删除任务后重新对齐该类型状态字段（最新任务回退为旧任务，或清空为未开始）
-		return model.VideoResyncTaskStatusTx(tx, task.VideoID, task.TaskType)
+		if err := model.VideoResyncTaskStatusTx(tx, task.VideoID, task.TaskType); err != nil {
+			return err
+		}
+		delTask = task
+		return nil
 	})
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return enum.ErrTaskNotFound
 		}
+		if bizErr, ok := err.(*enum.BizError); ok {
+			return bizErr
+		}
 		return enum.ErrDatabase.WithMsg(fmt.Sprintf("删除任务失败: %v", err))
 	}
 
-	if deleteFiles {
-		deleteTaskOutputFiles(ctx, task)
+	if deleteFiles && delTask != nil {
+		// 构造一个含 VideoID/TaskType/Overwrite/SourcePath 的任务用于删除文件
+		deleteTaskOutputFiles(ctx, delTask)
 	}
 	return nil
 }
@@ -290,36 +306,41 @@ func (l *TaskLogic) BatchDelete(ctx context.Context, deleteReq *req.TaskBatchDel
 		}
 		seen[id] = struct{}{}
 
-		task, err := model.TaskGetByID(ctx, id)
-		if err != nil {
-			return nil, enum.ErrDatabase.WithMsg(fmt.Sprintf("查询任务失败: %v", err))
-		}
-		if task == nil {
-			result.Skipped++
-			continue
-		}
-		if task.Status == model.TaskStatusRunning {
-			result.Skipped++
-			continue
-		}
-
-		err = model.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var delTask *model.Task
+		err := model.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			task, err := model.TaskGetByIDTx(tx, id)
+			if err != nil {
+				return err
+			}
+			if task == nil {
+				return gorm.ErrRecordNotFound
+			}
+			if task.Status == model.TaskStatusRunning || task.Status == model.TaskStatusCancelling {
+				return enum.ErrTaskRunningCannotDelete
+			}
 			if err := model.TaskDeleteTx(tx, id); err != nil {
 				return err
 			}
-			// 删除任务后重新对齐该类型状态字段（最新任务回退为旧任务，或清空为未开始）
-			return model.VideoResyncTaskStatusTx(tx, task.VideoID, task.TaskType)
+			if err := model.VideoResyncTaskStatusTx(tx, task.VideoID, task.TaskType); err != nil {
+				return err
+			}
+			delTask = task
+			return nil
 		})
 		if err != nil {
 			if err == gorm.ErrRecordNotFound {
 				result.Skipped++
 				continue
 			}
+			if err == enum.ErrTaskRunningCannotDelete {
+				result.Skipped++
+				continue
+			}
 			return nil, enum.ErrDatabase.WithMsg(fmt.Sprintf("删除任务失败: %v", err))
 		}
 
-		if deleteReq.DeleteFiles {
-			deleteTaskOutputFiles(ctx, task)
+		if deleteReq.DeleteFiles && delTask != nil {
+			deleteTaskOutputFiles(ctx, delTask)
 		}
 		result.Deleted++
 	}

@@ -424,8 +424,13 @@ func classifyOutputFile(fileName, videoBaseName string) string {
 		return "subtitle"
 	}
 
-	// 字幕合成视频：<video>_subtitled.<ext>
-	if model.IsVideoFile(fileName) && strings.HasSuffix(base, "_subtitled") {
+	// 清晰度修复输出视频：含 _upscaled_ 特征，优先级高于 repaired 避免链式文件误分类
+	if model.IsVideoFile(fileName) && (strings.Contains(base, "_upscaled")) {
+		return "upscaled_video"
+	}
+
+	// 字幕合成视频：<video>_subtitled.<ext> 或 <video>_subtitled_<nonce>.<ext>
+	if model.IsVideoFile(fileName) && strings.Contains(base, "_subtitled") {
 		return "subtitled_video"
 	}
 
@@ -441,11 +446,6 @@ func classifyOutputFile(fileName, videoBaseName string) string {
 			strings.HasPrefix(base, "fixed_") {
 			return "repaired_video"
 		}
-	}
-
-	// 清晰度修复输出视频：含 _upscaled_ 特征
-	if model.IsVideoFile(fileName) && strings.Contains(base, "_upscaled") {
-		return "upscaled_video"
 	}
 
 	return "unknown"

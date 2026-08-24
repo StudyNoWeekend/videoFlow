@@ -85,6 +85,19 @@ type TaskListQuery struct {
 	TaskType string
 }
 
+// TaskExistsPendingOrRunningByVideoAndType 检查指定视频是否存在进行中（pending/running/cancelling）的同类型任务
+func TaskExistsPendingOrRunningByVideoAndType(ctx context.Context, videoID, taskType string) (bool, error) {
+	var count int64
+	err := DB.WithContext(ctx).Model(&Task{}).
+		Where("video_id = ? AND task_type = ? AND status IN ? AND deleted_at IS NULL",
+			videoID, taskType, []string{TaskStatusPending, TaskStatusRunning, TaskStatusCancelling}).
+		Count(&count).Error
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
 // TaskCreate 创建任务记录
 func TaskCreate(ctx context.Context, task *Task) error {
 	return DB.WithContext(ctx).Create(task).Error
@@ -198,7 +211,9 @@ func TaskList(ctx context.Context, query *TaskListQuery) ([]*TaskWithVideo, int6
 	return list, total, nil
 }
 
-// TaskUpdateStatusTx 在事务中更新任务状态、进度与进度描述
+// TaskUpdateStatusTx 在事务中更新任务状态、进度与进度描述。
+// 仅当任务仍处于 running 时生效：避免取消（cancelling）后迟到的进度回调
+// 把状态打回 running，破坏取消流程。
 func TaskUpdateStatusTx(tx *gorm.DB, id string, status string, progress int, progressMsg string) error {
 	updates := map[string]interface{}{
 		"status":     status,
@@ -208,7 +223,7 @@ func TaskUpdateStatusTx(tx *gorm.DB, id string, status string, progress int, pro
 	if progressMsg != "" {
 		updates["progress_msg"] = progressMsg
 	}
-	return tx.Model(&Task{}).Where("id = ?", id).Updates(updates).Error
+	return tx.Model(&Task{}).Where("id = ? AND status = ?", id, status).Updates(updates).Error
 }
 
 // TaskUpdateResultTx 在事务中将任务标记为完成并保存结果
@@ -253,10 +268,11 @@ func TaskUpdateCancelledTx(tx *gorm.DB, id string, msg string) error {
 // TaskResetFailedTx 在事务中将失败任务重置为 pending（手动重试或调度器停止时回退）
 func TaskResetFailedTx(tx *gorm.DB, id string) error {
 	return tx.Model(&Task{}).Where("id = ?", id).Updates(map[string]interface{}{
-		"status":     TaskStatusPending,
-		"progress":   0,
-		"error_msg":  "",
-		"updated_at": time.Now().Unix(),
+		"status":       TaskStatusPending,
+		"progress":     0,
+		"error_msg":    "",
+		"progress_msg": "",
+		"updated_at":   time.Now().Unix(),
 	}).Error
 }
 
@@ -295,11 +311,11 @@ func TaskDeleteTx(tx *gorm.DB, id string) error {
 	return nil
 }
 
-// TaskMarkRunningAsFailed 将所有 running 状态的任务标记为失败，
+// TaskMarkRunningAsFailed 将所有 running 和 cancelling 状态的任务标记为失败，
 // 用于程序优雅关闭（收到终止信号）以及重启时清理上次非正常退出残留的任务。
 func TaskMarkRunningAsFailed(ctx context.Context, reason string) (int64, error) {
 	result := DB.WithContext(ctx).Model(&Task{}).
-		Where("status = ?", TaskStatusRunning).
+		Where("status IN ?", []string{TaskStatusRunning, TaskStatusCancelling}).
 		Updates(map[string]interface{}{
 			"status":     TaskStatusFailed,
 			"error_msg":  reason,
