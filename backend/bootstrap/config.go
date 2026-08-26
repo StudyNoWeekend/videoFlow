@@ -12,7 +12,7 @@ import (
 var Config *AppConfig
 
 // AppVersion 应用版本号
-const AppVersion = "v0.3.2"
+const AppVersion = "v0.4.0"
 
 // AppConfig 应用配置总入口
 type AppConfig struct {
