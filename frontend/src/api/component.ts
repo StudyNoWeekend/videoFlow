@@ -2,7 +2,7 @@ import request, { type ApiResponse } from './request'
 
 // 组件状态
 export type ComponentStatus = 'installed' | 'missing' | 'installing' | 'error'
-export type ComponentType = 'docker' | 'ffmpeg' | 'whisper_asr' | 'lada' | 'video2x'
+export type ComponentType = 'docker' | 'ffmpeg' | 'whisper_asr' | 'lada' | 'video2x' | 'yt-dlp'
 
 export interface ComponentInfo {
   type: ComponentType

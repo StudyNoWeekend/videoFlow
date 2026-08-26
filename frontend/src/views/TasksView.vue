@@ -5,14 +5,20 @@ import { useI18n } from 'vue-i18n'
 import { listTasks, retryTask, cancelTask, deleteTask, batchDeleteTasks } from '@/api/task'
 import type { Task, TaskType } from '@/api/task'
 import { formatTime } from '@/utils/format'
+import { useResponsive } from '@/composables/useResponsive'
+import VfListPanel from '@/components/VfListPanel.vue'
 
 const { t } = useI18n()
+const { isMobileOnly, isMobileOrTablet, isDesktop } = useResponsive()
 const loading = ref<boolean>(false)
 const taskList = ref<Task[]>([])
 const activeType = ref<TaskType | ''>('')
 const page = ref<number>(1)
 const pageSize = ref<number>(10)
 const total = ref<number>(0)
+// 排序状态（空串表示默认排序：运行中优先+创建时间倒序）
+const sortBy = ref<string>('')
+const sortOrder = ref<'asc' | 'desc' | ''>('')
 let pollTimer: number | null = null
 
 // 多选批量删除
@@ -34,7 +40,7 @@ const failedCount = computed(() => taskList.value.filter((t) => t.status === 'fa
 async function loadTasks(): Promise<void> {
   loading.value = true
   try {
-    const res = await listTasks(page.value, pageSize.value, activeType.value || undefined)
+    const res = await listTasks(page.value, pageSize.value, activeType.value || undefined, sortBy.value || undefined, sortOrder.value || undefined)
     taskList.value = res.list
     total.value = res.total
     page.value = res.page
@@ -47,7 +53,7 @@ async function loadTasks(): Promise<void> {
 // 轮询时只更新进度、状态、错误信息，不显示全表 loading，也不重置分页
 async function pollTasks(): Promise<void> {
   try {
-    const res = await listTasks(page.value, pageSize.value, activeType.value || undefined)
+    const res = await listTasks(page.value, pageSize.value, activeType.value || undefined, sortBy.value || undefined, sortOrder.value || undefined)
     // 只更新进度/状态/错误信息，保持现有数据
     for (const incoming of res.list) {
       const existing = taskList.value.find((t) => t.id === incoming.id)
@@ -81,7 +87,7 @@ async function handleRetry(task: Task): Promise<void> {
 }
 
 async function handleDelete(task: Task): Promise<void> {
-  // 确认弹窗提供“同时删除对应输出文件”勾选框，由用户决定删除范围
+  // 确认弹窗提供"同时删除对应输出文件"勾选框，由用户决定删除范围
   const checkboxId = 'task-delete-files-' + task.id
   let confirmed = false
   try {
@@ -139,7 +145,7 @@ async function handleBatchDelete(): Promise<void> {
   const ids = selectedTasks.value.map((task) => task.id)
   if (ids.length === 0) return
 
-  // 确认弹窗提供“同时删除对应输出文件”勾选框
+  // 确认弹窗提供"同时删除对应输出文件"勾选框
   const checkboxId = 'tasks-batch-delete-files'
   let confirmed = false
   try {
@@ -230,6 +236,14 @@ function handleSizeChange(size: number): void {
   loadTasks()
 }
 
+// 创建时间列排序：点击表头上下 icon 切换正序/倒序，order 为 null 时恢复默认排序
+function handleSortChange({ prop, order }: { prop: string; order: string | null }): void {
+  sortBy.value = prop === 'created_at' ? 'created_at' : ''
+  sortOrder.value = order === 'ascending' ? 'asc' : order === 'descending' ? 'desc' : ''
+  page.value = 1
+  loadTasks()
+}
+
 function handlePollingChange(value: number): void {
   pollingInterval.value = value
   startPolling()
@@ -261,18 +275,27 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="tasks-view">
-    <div class="vf-panel">
-      <div class="vf-panel__footer"></div>
-
-      <div class="vf-panel-header">
-        <div class="vf-panel-header__title">
-          <span class="vf-led vf-led--cyan vf-led--pulse"></span>
-          <span>{{ $t('tasks.title') }}</span>
-          <span class="header__count">{{ $t('tasks.count', { count: total }) }}</span>
-        </div>
-
-        <div class="monitor-stats">
+  <div class="tasks-view responsive-page">
+    <VfListPanel
+      :title="$t('tasks.title')"
+      :count="total"
+      led-color="cyan"
+      :led-pulse="true"
+      :loading="loading"
+      :total="total"
+      :page="page"
+      :page-size="pageSize"
+      :page-sizes="[10, 20, 50, 100]"
+      :polling-interval="pollingInterval"
+      :polling-options="pollingOptions"
+      :show-polling="true"
+      @page-change="handlePageChange"
+      @size-change="handleSizeChange"
+      @update:polling-interval="handlePollingChange"
+      @refresh="loadTasks"
+    >
+      <template #header-extra>
+        <div class="monitor-stats hide-mobile">
           <div class="stat stat--running">
             <span class="vf-led vf-led--amber vf-led--pulse"></span>
             <span class="stat__label">{{ $t('tasks.running') }}</span>
@@ -284,94 +307,94 @@ onUnmounted(() => {
             <span class="stat__value">{{ failedCount }}</span>
           </div>
         </div>
-      </div>
+      </template>
 
-      <div class="panel-toolbar">
-        <div class="toolbar-left">
-          <el-button
-            type="danger"
-            size="small"
-            :disabled="selectedTasks.length === 0"
-            @click="handleBatchDelete"
-          >
-            <el-icon><Delete /></el-icon>{{ $t('tasks.batch_delete') }}<span v-if="selectedTasks.length" class="batch-count">{{ selectedTasks.length }}</span>
-          </el-button>
-          <el-radio-group v-model="activeType" @change="handleTypeChange">
-            <el-radio-button label="">{{ $t('tasks.filter.all') }}</el-radio-button>
-            <el-radio-button label="subtitle">{{ $t('tasks.filter.subtitle') }}</el-radio-button>
-            <el-radio-button label="subtitle_burn">{{ $t('tasks.filter.subtitle_burn') }}</el-radio-button>
-            <el-radio-button label="deblur">{{ $t('tasks.filter.deblur') }}</el-radio-button>
-            <el-radio-button label="upscale">{{ $t('tasks.filter.upscale') }}</el-radio-button>
-          </el-radio-group>
-        </div>
-        <div class="toolbar-right">
-          <div class="poll-control">
-            <span class="vf-data-label">{{ $t('tasks.polling.label') }}</span>
-            <el-select v-model="pollingInterval" size="small" style="width: 110px" @change="handlePollingChange">
-              <el-option
-                v-for="opt in pollingOptions"
-                :key="opt.value"
-                :label="$t(opt.label)"
-                :value="opt.value"
-              />
-            </el-select>
-            <span v-if="pollingInterval > 0" class="vf-led vf-led--green vf-led--pulse"></span>
-          </div>
-          <el-button type="primary" @click="loadTasks">
-            <el-icon><Refresh /></el-icon>{{ $t('tasks.refresh') }}
-          </el-button>
-        </div>
-      </div>
-
-      <div class="panel-body panel-body--compact">
-        <el-table
-          v-loading="loading"
-          :data="taskList"
-          style="width: 100%"
-          @selection-change="handleSelectionChange"
+      <template #toolbar-left>
+        <el-button
+          type="danger"
+          size="small"
+          :disabled="selectedTasks.length === 0"
+          @click="handleBatchDelete"
         >
-          <el-table-column type="selection" width="45" />
-          <el-table-column :label="$t('tasks.column.id')" width="130">
-            <template #default="{ row }">
-              <span class="task-id">#{{ row.id.slice(-8).toUpperCase() }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column :label="$t('tasks.column.video')" min-width="200" show-overflow-tooltip>
-            <template #default="{ row }">
-              {{ row.video?.name || row.video_id }}
-            </template>
-          </el-table-column>
-          <el-table-column :label="$t('tasks.column.type')" width="100">
-            <template #default="{ row }">
-              <el-tag :type="row.task_type === 'deblur' ? 'warning' : row.task_type === 'subtitle_burn' ? 'success' : row.task_type === 'upscale' ? 'success' : 'primary'">{{ typeText(row.task_type) }}</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column :label="$t('tasks.column.status')" width="130">
-            <template #default="{ row }">
-              <div class="status-cell">
-                <span :class="['vf-led', statusLedClass(row.status)]"></span>
-                <el-tag :type="statusType(row.status)">{{ statusText(row.status) }}</el-tag>
-              </div>
-            </template>
-          </el-table-column>
-          <el-table-column :label="$t('tasks.column.progress')" min-width="240">
-            <template #default="{ row }">
-              <el-progress :percentage="row.progress" :status="row.status === 'failed' ? 'exception' : row.status === 'completed' ? 'success' : ''" />
-              <div v-if="row.progress_msg" class="progress-msg">{{ row.progress_msg }}</div>
-            </template>
-          </el-table-column>
-          <el-table-column :label="$t('tasks.column.error')" min-width="160" show-overflow-tooltip>
-            <template #default="{ row }">
-              {{ row.error_msg || '-' }}
-            </template>
-          </el-table-column>
-          <el-table-column :label="$t('tasks.column.created')" width="170">
-            <template #default="{ row }">
-              {{ formatTime(row.created_at) }}
-            </template>
-          </el-table-column>
-          <el-table-column :label="$t('tasks.column.action')" width="210" fixed="right">
-            <template #default="{ row }">
+          <el-icon><Delete /></el-icon>{{ $t('tasks.batch_delete') }}<span v-if="selectedTasks.length" class="batch-count">{{ selectedTasks.length }}</span>
+        </el-button>
+        <!-- 桌面/平板端：radio-button 分组过滤器 -->
+        <el-radio-group v-if="!isMobileOnly" :model-value="activeType" @change="handleTypeChange">
+          <el-radio-button label="">{{ $t('tasks.filter.all') }}</el-radio-button>
+          <el-radio-button label="subtitle">{{ $t('tasks.filter.subtitle') }}</el-radio-button>
+          <el-radio-button label="subtitle_burn">{{ $t('tasks.filter.subtitle_burn') }}</el-radio-button>
+          <el-radio-button label="deblur">{{ $t('tasks.filter.deblur') }}</el-radio-button>
+          <el-radio-button label="upscale">{{ $t('tasks.filter.upscale') }}</el-radio-button>
+        </el-radio-group>
+        <!-- 手机端：下拉选择过滤器 -->
+        <el-select v-else :model-value="activeType" size="small" style="width: 120px" @change="handleTypeChange">
+          <el-option :label="$t('tasks.filter.all')" value="" />
+          <el-option :label="$t('tasks.filter.subtitle')" value="subtitle" />
+          <el-option :label="$t('tasks.filter.subtitle_burn')" value="subtitle_burn" />
+          <el-option :label="$t('tasks.filter.deblur')" value="deblur" />
+          <el-option :label="$t('tasks.filter.upscale')" value="upscale" />
+        </el-select>
+      </template>
+
+      <template #toolbar-right>
+        <el-button type="primary" size="small" @click="loadTasks">
+          <el-icon><Refresh /></el-icon>
+          <span class="hide-mobile">{{ $t('tasks.refresh') }}</span>
+        </el-button>
+      </template>
+
+      <!-- 桌面/平板：表格模式 -->
+      <el-table
+        v-if="!isMobileOnly"
+        v-loading="loading"
+        :data="taskList"
+        style="width: 100%"
+        @selection-change="handleSelectionChange"
+        @sort-change="handleSortChange"
+      >
+        <el-table-column type="selection" width="40" />
+        <el-table-column :label="$t('tasks.column.id')" width="100">
+          <template #default="{ row }">
+            <span class="task-id">#{{ row.id.slice(-8).toUpperCase() }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column :label="$t('tasks.column.video')" min-width="160" show-overflow-tooltip>
+          <template #default="{ row }">
+            {{ row.video?.name || row.video_id }}
+          </template>
+        </el-table-column>
+        <el-table-column :label="$t('tasks.column.type')" width="90">
+          <template #default="{ row }">
+            <el-tag :type="row.task_type === 'deblur' ? 'warning' : row.task_type === 'subtitle_burn' ? 'success' : row.task_type === 'upscale' ? 'success' : 'primary'">{{ typeText(row.task_type) }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column :label="$t('tasks.column.status')" width="110">
+          <template #default="{ row }">
+            <div class="status-cell">
+              <span :class="['vf-led', statusLedClass(row.status)]"></span>
+              <el-tag :type="statusType(row.status)">{{ statusText(row.status) }}</el-tag>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column v-if="!isMobileOrTablet" :label="$t('tasks.column.progress')" min-width="180">
+          <template #default="{ row }">
+            <el-progress :percentage="row.progress" :status="row.status === 'failed' ? 'exception' : row.status === 'completed' ? 'success' : ''" />
+            <div v-if="row.progress_msg" class="progress-msg">{{ row.progress_msg }}</div>
+          </template>
+        </el-table-column>
+        <el-table-column v-if="isDesktop || !isMobileOrTablet" :label="$t('tasks.column.error')" min-width="120" show-overflow-tooltip>
+          <template #default="{ row }">
+            {{ row.error_msg || '-' }}
+          </template>
+        </el-table-column>
+        <el-table-column v-if="isDesktop || !isMobileOrTablet" :label="$t('tasks.column.created')" width="150" sortable="custom" prop="created_at">
+          <template #default="{ row }">
+            {{ formatTime(row.created_at) }}
+          </template>
+        </el-table-column>
+        <el-table-column :label="$t('tasks.column.action')" min-width="180">
+          <template #default="{ row }">
+            <div class="action-cell">
               <el-button
                 v-if="row.status === 'failed' || row.status === 'cancelled'"
                 type="warning"
@@ -397,39 +420,62 @@ onUnmounted(() => {
               >
                 {{ $t('tasks.btn.delete') }}
               </el-button>
-            </template>
-          </el-table-column>
-          <template #empty>
-            <div class="empty-state">{{ $t('tasks.empty') }}</div>
+            </div>
           </template>
-        </el-table>
-      </div>
+        </el-table-column>
+        <template #empty>
+          <div class="empty-state">{{ $t('tasks.empty') }}</div>
+        </template>
+      </el-table>
 
-      <div class="panel-footer">
-        <el-pagination
-          v-model:current-page="page"
-          v-model:page-size="pageSize"
-          :total="total"
-          :page-sizes="[10, 20, 50, 100]"
-          layout="total, sizes, prev, pager, next"
-          @size-change="handleSizeChange"
-          @current-change="handlePageChange"
-        />
+      <!-- 手机端（< 480px）：紧凑卡片模式 -->
+      <div v-else class="task-cards">
+        <div v-if="loading" class="mobile-loading">
+          <span class="vf-led vf-led--amber vf-led--pulse"></span>
+          <span>{{ $t('common.loading') }}</span>
+        </div>
+        <div
+          v-for="row in taskList"
+          :key="row.id"
+          class="task-card"
+        >
+          <div class="task-card__top">
+            <span class="task-card__video">{{ row.video?.name || row.video_id }}</span>
+            <el-tag :type="row.task_type === 'deblur' ? 'warning' : row.task_type === 'subtitle_burn' ? 'success' : row.task_type === 'upscale' ? 'success' : 'primary'" size="small">{{ typeText(row.task_type) }}</el-tag>
+          </div>
+          <div class="task-card__mid">
+            <div class="task-card__status">
+              <span :class="['vf-led', statusLedClass(row.status)]"></span>
+              <el-tag :type="statusType(row.status)" size="small">{{ statusText(row.status) }}</el-tag>
+            </div>
+            <span v-if="row.progress > 0 && row.progress < 100" class="task-card__progress-text">{{ row.progress }}%</span>
+          </div>
+          <div class="task-card__actions">
+            <el-button
+              v-if="row.status === 'failed' || row.status === 'cancelled'"
+              type="warning" size="small" round @click="handleRetry(row)"
+            >{{ $t('tasks.btn.retry') }}</el-button>
+            <el-button
+              v-if="row.status === 'running' || row.status === 'pending'"
+              type="danger" size="small" round plain @click="handleCancel(row)"
+            >{{ $t('tasks.btn.cancel') }}</el-button>
+            <el-button
+              v-if="row.status !== 'running' && row.status !== 'cancelling'"
+              type="danger" size="small" round plain @click="handleDelete(row)"
+            >{{ $t('tasks.btn.delete') }}</el-button>
+          </div>
+        </div>
+        <div v-if="taskList.length === 0 && !loading" class="mobile-empty">
+          <span>{{ $t('tasks.empty') }}</span>
+        </div>
       </div>
-    </div>
+    </VfListPanel>
   </div>
 </template>
 
 <style scoped>
 .tasks-view {
-  padding: 20px;
   min-height: 100%;
-}
-
-.vf-panel {
-  min-height: calc(100vh - 92px);
-  display: flex;
-  flex-direction: column;
 }
 
 .header__count {
@@ -474,26 +520,6 @@ onUnmounted(() => {
   text-align: right;
 }
 
-.panel-toolbar {
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--vf-border);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.toolbar-left {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
-
-.toolbar-right {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
-
 .batch-count {
   font-family: var(--vf-font-mono);
   font-size: 11px;
@@ -501,17 +527,14 @@ onUnmounted(() => {
   opacity: 0.85;
 }
 
-.poll-control {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+/* 手机端 toolbar-left 内紧凑排列 */
+@media (max-width: 480px) {
+  .toolbar-left {
+    gap: 6px;
+  }
 }
 
-.panel-body--compact {
-  padding: 0;
-}
-
-.panel-body--compact :deep(.el-table__header-wrapper) {
+.table-outer :deep(.el-table__header-wrapper) {
   border-bottom: 1px solid var(--vf-border);
 }
 
@@ -542,10 +565,85 @@ onUnmounted(() => {
   font-size: 14px;
 }
 
-.panel-footer {
-  padding: 12px 16px;
-  border-top: 1px solid var(--vf-border);
+.action-cell {
   display: flex;
-  justify-content: flex-end;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+/* ========== 手机端紧凑卡片模式（< 480px） ========== */
+.task-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+}
+
+.mobile-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 40px 0;
+  color: var(--vf-text-muted);
+  font-size: 14px;
+}
+
+.task-card {
+  background: var(--vf-bg-elevated);
+  border: 1px solid var(--vf-border);
+  border-radius: var(--vf-radius);
+  padding: 10px 12px;
+}
+
+.task-card__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  gap: 8px;
+}
+
+.task-card__video {
+  flex: 1;
+  font-family: var(--vf-font-display);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--vf-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-card__mid {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.task-card__status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.task-card__progress-text {
+  font-family: var(--vf-font-mono);
+  font-size: 11px;
+  color: var(--vf-text-muted);
+}
+
+.task-card__actions {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.mobile-empty {
+  padding: 40px 0;
+  text-align: center;
+  color: var(--vf-text-muted);
+  font-size: 14px;
 }
 </style>

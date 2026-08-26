@@ -61,6 +61,9 @@ var (
 	ErrTaskComponentMissing    = NewBizError(10070007, "任务依赖组件未就绪", 400)
 	ErrTaskDuplicate           = NewBizError(10070008, "该视频已存在同类型的进行中任务，请等待其完成后再试", 400)
 
+	// 下载相关错误
+	ErrDownloadNotFound = NewBizError(10100001, "下载任务不存在", 404)
+
 	// 字幕导出相关错误
 	ErrInvalidSubtitleFormat = NewBizError(10080001, "字幕格式参数错误，仅支持 srt/vtt/ass", 400)
 

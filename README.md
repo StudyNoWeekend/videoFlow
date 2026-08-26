@@ -2,7 +2,7 @@
 
 # VideoFlow
 
-### 给 Whisper + FFmpeg 装上 Web 可视化管理 —— 扫描视频目录，字幕自动生成，损坏视频一键去马赛克。
+### 给 Whisper + FFmpeg + yt-dlp 装上 Web 可视化管理 —— 扫描视频目录，字幕自动生成，视频在线下载，损坏视频一键去马赛克。
 
 基于 Whisper ASR + FFmpeg + Docker 去马赛克引擎，用 Vue 3 + Element Plus 打造的 Web 可视化管理界面。告别脚本拼装，扫描入库、创建任务、实时进度、在线配置，全部在浏览器里完成。后端 Go（Gin + GORM + SQLite），支持 Docker 一键部署。
 
@@ -31,22 +31,23 @@
 
 ## 💡 项目亮点
 
-本项目最大的亮点是：**把 Whisper 语音识别、FFmpeg 音频处理、Docker 去马赛克、清晰度增强这四件本来要拼脚本才能串起来的事，整合成了一套开箱即用的 Web 可视化管理平台**。
+本项目最大的亮点是：**把 Whisper 语音识别、FFmpeg 音频处理、yt-dlp 视频下载、Docker 去马赛克、清晰度增强这五件本来要拼脚本才能串起来的事，整合成了一套开箱即用的 Web 可视化管理平台**。
 
-单独用 Whisper / FFmpeg 并不难，但要把「扫描目录 -> 提取音频 -> 调 ASR -> 生成字幕 -> 任务并发 -> 进度跟踪 -> 失败重试 -> 在线改配置」串成完整流水线，命令行和脚本很难做得顺手。VideoFlow 在不改动底层引擎的前提下，给它套上了一层 Web UI：
+单独用 Whisper / FFmpeg / yt-dlp 并不难，但要把「扫描目录 -> 提取音频 -> 调 ASR -> 生成字幕 -> 下载视频 -> 任务并发 -> 进度跟踪 -> 失败重试 -> 在线改配置」串成完整流水线，命令行和脚本很难做得顺手。VideoFlow 在不改动底层引擎的前提下，给它套上了一层 Web UI：
 
 | 对比 | 手动拼装（Whisper + FFmpeg 脚本） | VideoFlow（本项目） |
 | --- | --- | --- |
 | 交互方式 | 命令行参数 + shell 脚本 | 浏览器图形界面，鼠标点点点 |
 | 字幕生成 | 手动提取音频、调 ASR、拼字幕文件 | 一键创建任务，自动 提取音频 -> ASR -> 生成字幕 |
 | 去马赛克 | 手动跑 Docker 命令、盯终端 | 一键去马赛克任务，支持 CPU / CUDA / MPS / XPU |
-| 清晰度增强 | 自己找工具、参数难调 | 一键升级分辨率，Real-ESRGAN / Real-CUGAN / libplacebo 可选 |
-| 任务管理 | 自己记，关掉终端就没了 | 任务列表 + 实时进度 + 失败重试 + 历史可查 |
-| 并发控制 | 自己写队列 / 信号量 | 调度器按配置并发数自动调度 |
+| 清晰度增强 | 自己找工具、参数难调 | 一键升级分辨率，Real-ESRGAN / Real-CUGAN / libplacebo 可选，处理器 / 模型 / 降噪等级按任务指定 |
+| 视频下载 | 手动找 yt-dlp / 浏览器插件，下载散落各处 | 内置下载管理，URL 提交即下，自动入库视频列表 |
+| 任务管理 | 自己记，关掉终端就没了 | 任务列表 + 实时进度 + 取消任务 + 失败重试 + 历史可查 |
+| 并发控制 | 自己写队列 / 信号量 | 调度器按类型独立并发数自动调度，运行时在线调整 |
 | 配置修改 | 改配置文件、重启服务 | 在线修改，保存即热生效，持久化到数据库 |
 | 部署形态 | 一堆依赖要装 | Docker 单镜像，挂载配置即跑 |
 
-底层复用 [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice) 的识别能力、[FFmpeg](https://ffmpeg.org/) 的音视频处理、[`ladaapp/lada`](https://github.com/ladaapp/lada) 的去马赛克，在其之上封装出 HTTP API 与 Web 前端 —— **命令行的能力，图形界面的体验**。
+底层复用 [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice) 的识别能力、[FFmpeg](https://ffmpeg.org/) 的音视频处理、[yt-dlp](https://github.com/yt-dlp/yt-dlp) 的下载能力、[`ladaapp/lada`](https://github.com/ladaapp/lada) 的去马赛克，在其之上封装出 HTTP API 与 Web 前端 —— **命令行的能力，图形界面的体验**。
 
 ## 🎯 谁会想用
 
@@ -56,6 +57,7 @@
 | **字幕组 / 翻译爱好者** | 用 Whisper 批量转录生成时间轴，再人工校对，效率翻倍 |
 | **有损坏视频的人** | 视频打不开？用 lada Docker 一键去马赛克，支持多种计算设备 |
 | **NAS / 家庭服务器玩家** | Docker 长期挂着，定时扫描目录自动入库，新视频自动生成字幕 |
+| **从网络下载视频的人** | 内置 yt-dlp 下载管理，URL 提交即下，进度实时跟踪，下载完成自动入库到视频列表 |
 | **想本地跑 Whisper 的人** | 不想写脚本，Web 界面配置 ASR 参数（语言 / VAD / 提示词）即可 |
 | **嫌命令行麻烦的人** | 全程图形界面，配置、扫描、任务进度一目了然 |
 | **本地化运行** | ffmpeg 自动智能调用本地已安装的 ffmpeg，无需额外配置 |
@@ -63,14 +65,20 @@
 ## ✨ 功能特性
 
 - **输入 / 输出目录分离** - 扫描输入目录自动入库；任务产物（字幕 / 烧录视频 / 去马赛克 / 清晰度修复视频）统一输出到可配置的输出目录，任务状态以视频记录的状态字段为准、由任务生命周期实时同步
+- **视频下载** - 基于 yt-dlp 内置下载管理，支持 YouTube / Bilibili / Twitter / Instagram / TikTok / Facebook / Twitch / Vimeo / Niconico / Dailymotion / Reddit / Tumblr 等主流平台，URL 提交即下，进度实时跟踪，下载完成自动入库到视频列表
 - **字幕生成** - 基于 Whisper ASR，支持语言、VAD 过滤、任务类型、音频预编码、初始提示词、词级时间戳、多种输出格式（json / srt / vtt / txt / tsv）
-- **去马赛克** - 基于 Docker 镜像 `ladaapp/lada`，支持 x86_64 CPU 以及 NVIDIA CUDA 显卡（Turing 系列或更高版本，包括 RTX 20xx 到 RTX 50xx 系列），CUDA 设备自动透传（`--gpus`）、GPU 故障原因自动提示
-- **清晰度增强** - 基于 Video2X（`ghcr.io/k4yt3x/video2x:latest`）将视频升级到更高分辨率，支持 Real-ESRGAN / Real-CUGAN / libplacebo 处理器，目标分辨率与降噪等级按任务指定
-- **任务管理** - 创建 / 查询 / 删除（支持多选批量删除，可勾选同时删除输出文件）/ 失败重试，按类型过滤，实时进度条，前端 2 秒轮询刷新；进行中的任务优先展示，同状态下最新创建的在前
-- **任务调度器** - 后台调度器按配置的并发数限制执行字幕 / 去马赛克 / 清晰度增强任务，轮询间隔可在线配置，取消任务自动清理遗留的半成品输出文件
+- **字幕烧录** - 将生成的字幕永久写入视频画面（硬编码），支持三级字幕查找（已完成记录 → 输出目录 SRT 文件 → 自动生成），自动生成的侧边字幕任务记录重启后保留
+- **去马赛克** - 基于 Docker 镜像 `ladaapp/lada`，支持 x86_64 CPU 以及 NVIDIA CUDA 显卡（Turing 系列或更高版本，包括 RTX 20xx 到 RTX 50xx 系列），CUDA 设备自动透传（`--gpus`）、GPU 故障原因自动提示；支持选择派生视频作为处理源 + 覆写模式
+- **清晰度增强** - 基于 Video2X（`ghcr.io/k4yt3x/video2x:latest`）将视频升级到更高分辨率，支持 Real-ESRGAN / Real-CUGAN / libplacebo 处理器，处理器 / 模型 / 降噪等级按任务独立指定，目标分辨率自定义；支持选择派生视频作为处理源 + 覆写模式
+- **任务管理** - 创建 / 查询 / 删除（支持多选批量删除，可勾选同时删除输出文件）/ 取消 / 失败重试，按类型过滤，实时进度条，前端 2 秒轮询刷新；进行中的任务优先展示，同状态下最新创建的在前；取消任务自动清理遗留的半成品输出文件
+- **任务调度器** - 后台调度器为字幕 / 字幕烧录 / 去马赛克 / 清晰度增强分别独立控制并发数，轮询间隔可在线配置，取消任务自动清理遗留的半成品输出文件
 - **用户认证** - 首次启动引导初始化管理员账号，登录 / 修改密码 / 密码重置，业务 API 全部走 JWT 鉴权
-- **运行时配置** - 统一配置页，所有配置在线修改并持久化（SQLite），保存即热生效
+- **运行时配置** - 统一配置页，所有配置在线修改并持久化（SQLite），保存即热生效；配置项覆盖 ASR / 去马赛克 / 清晰度增强 / 各类型并发数 / 轮询间隔
 - **FFmpeg 智能调用** - 自动探测本地 ffmpeg，无需手动配置
+- **组件管理** - Docker / FFmpeg / Whisper ASR / Lada / Video2X / yt-dlp 六大组件状态检测与安装引导，安装进度 SSE 实时推送，安装历史可追溯
+- **暗色 / 亮色主题** - 一键切换，Element Plus 组件样式同步适配
+- **国际化** - 内置简体中文 / 繁體中文 / English / 日本語 四语言支持，运行时即时切换
+- **响应式布局** - 桌面端全功能表格视图、平板端折叠侧栏、移动端（<480px）紧凑卡片布局，所有核心页面自适应
 - **工程化** - `trace_id` 全链路追踪、统一响应结构、zap 结构化日志、优雅关闭（重启时运行中任务自动标记失败）
 
 ## 📥 快速开始
@@ -85,7 +93,7 @@ docker pull ghcr.io/studynoweekend/videoflow:latest
 
 **重要：挂载说明**
 
-VideoFlow 部署在 Docker 容器内，但需要操作**宿主机**的 Docker daemon（用于安装/检测 Whisper ASR、Lada 等组件），因此必须挂载 Docker 套接字。同时视频目录需要通过 volume 挂载到容器内（只读即可），任务输出目录也需要挂载（可写，任务产物统一输出到这里）。
+VideoFlow 部署在 Docker 容器内，但需要操作**宿主机**的 Docker daemon（用于安装/检测 Whisper ASR、Lada、yt-dlp 等组件），因此必须挂载 Docker 套接字。同时视频目录需要通过 volume 挂载到容器内（只读即可），任务输出目录也需要挂载（可写，任务产物统一输出到这里）。
 
 推荐使用 `docker-compose`（配置文件见项目根目录 `docker-compose.yml`）：
 
@@ -110,7 +118,7 @@ docker run -d --name videoflow \
   -v "$PWD/config.yaml:/app/config/config.yaml:ro" \
   # 数据持久化（必需）
   -v "$PWD/data:/app/data" \
-  # 宿主机 Docker 套接字（必需：组件安装/检测/去马赛克都需要）
+  # 宿主机 Docker 套接字（必需：组件安装/检测/去马赛克/yt-dlp 下载都需要）
   -v /var/run/docker.sock:/var/run/docker.sock \
   # 视频目录（必需：将宿主机视频目录映射到容器内路径，
   # 然后在 VideoFlow 设置页中配置对应容器内路径）
@@ -211,6 +219,7 @@ APP_HTTP_PORT=9090 go run ./cmd/api   # 后端
 | 音视频 | [FFmpeg](https://ffmpeg.org/) / ffprobe | 音频提取、时长探测，智能本地调用 |
 | 去马赛克 | [`ladaapp/lada`](https://github.com/ladaapp/lada) | Docker 去马赛克引擎 |
 | 清晰度增强 | [Video2X](https://github.com/k4yt3x/video2x) | Docker 清晰度增强引擎 |
+| 视频下载 | [yt-dlp](https://github.com/yt-dlp/yt-dlp) | 在线视频下载引擎 |
 | 前端 | [Vue 3](https://vuejs.org/) + [Element Plus](https://element-plus.org/) + [Vite](https://vite.dev/) | 图形界面 |
 | 状态管理 | [Pinia](https://pinia.vuejs.org/) | 前端状态 |
 | HTTP 客户端 | [Axios](https://axios-http.com/) | 接口请求 |
@@ -253,12 +262,21 @@ asr:
   initial_prompt: ""
   word_timestamps: false
   output: json
-repair:
-  docker_image: ladaapp/lada:latest
-  device: cpu            # cpu / cuda:0 / mps / xpu:0
-concurrency:
-  subtitle: 2
-  repair: 1
+	repair:
+	  docker_image: ladaapp/lada:latest
+	  device: cpu            # cpu / cuda:0 / mps / xpu:0
+	upscale:
+	  docker_image: ghcr.io/k4yt3x/video2x:latest
+	  device: cpu            # cpu / cuda:0
+	concurrency:
+	  subtitle: 2
+	  subtitle_burn: 1
+	  repair: 1
+	  upscale: 1
+	download:
+	  concurrency: 3
+	scheduler:
+	  poll_interval: 5
 ```
 
 </details>
@@ -277,6 +295,7 @@ viper 前缀 `APP_`，配置键 `.` -> `_`，故 `http.port` 对应环境变量 
 | `APP_ASR_URL` | `asr.url` | `http://127.0.0.1:9999/asr` |
 | `APP_ASR_LANGUAGE` | `asr.language` | `zh` |
 | `APP_REPAIR_DEVICE` | `repair.device` | `cpu` |
+| `APP_UPSCALE_DEVICE` | `upscale.device` | `cpu` |
 | `APP_DATABASE_DSN` | `database.dsn` | `data/app.db` |
 
 </details>
@@ -367,7 +386,7 @@ viper 前缀 `APP_`，配置键 `.` -> `_`，故 `http.port` 对应环境变量 
 | `POST` | `/api/v1/tasks/:id/retry` | 重试失败任务 |
 | `DELETE` | `/api/v1/tasks/:id` | 删除任务（可选 `?delete_files=true` 同时删除输出文件） |
 
-任务状态：`pending`（待处理）-> `running`（进行中）-> `completed`（已完成）/ `failed`（失败）/ `cancelled`（已取消）
+任务状态：`pending`（待处理）-> `running`（进行中）-> `completed`（已完成）/ `failed`（失败）/ `cancelling`（取消中）-> `cancelled`（已取消）
 
 > **任务状态以视频记录为准**：视频页的任务状态列直接读取视频记录中的任务状态字段（`subtitle_status` / `subtitle_burn_status` / `deblur_status` / `upscale_status`），由任务生命周期实时同步（创建→待处理、认领→进行中、完成→已完成、失败→失败、取消→已取消、删除任务→回退/清空）。删除任务记录可勾选同时删除对应输出文件。
 
@@ -376,11 +395,27 @@ viper 前缀 `APP_`，配置键 `.` -> `_`，故 `http.port` 对应环境变量 
 </details>
 
 <details>
+<summary><b>下载接口</b></summary>
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `POST` | `/api/v1/downloads` | 创建下载任务（body 传 `url`） |
+| `GET` | `/api/v1/downloads` | 分页查询下载列表（支持按 `created_at` / `file_size` 排序） |
+| `POST` | `/api/v1/downloads/:id/cancel` | 取消下载任务 |
+| `DELETE` | `/api/v1/downloads/:id` | 删除下载记录 |
+
+下载状态：`pending`（待处理）→ `probing`（探测中）→ `downloading`（下载中）→ `completed`（已完成）/ `failed`（失败）/ `cancelled`（已取消）
+
+下载完成后自动通过 `VideoUpsertByPath` 将文件注册到视频列表。
+
+</details>
+
+<details>
 <summary><b>组件接口</b></summary>
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| `GET` | `/api/v1/components` | 检测各组件状态（Docker / FFmpeg / Whisper ASR / lada / Video2X） |
+| `GET` | `/api/v1/components` | 检测各组件状态（Docker / FFmpeg / Whisper ASR / lada / Video2X / yt-dlp） |
 | `GET` | `/api/v1/components/install/progress/:session_id` | 组件安装进度（SSE 实时推送，公开接口） |
 
 </details>
@@ -398,43 +433,45 @@ viper 前缀 `APP_`，配置键 `.` -> `_`，故 `http.port` 对应环境变量 
 ## 📁 项目结构
 
 ```
-videoFlow/
-├── backend/
-│   ├── cmd/api/              # 程序入口 main.go
-│   ├── bootstrap/            # 配置、DB、ASR、FFmpeg、去马赛克 等初始化
-│   ├── config/               # 配置文件（config.yaml.local 为模板）
-│   ├── internal/
-│   │   ├── controller/       # HTTP 控制器
-│   │   ├── logic/            # 业务逻辑
-│   │   ├── model/            # 数据模型与持久化（GORM）
-│   │   ├── dto/              # 请求/响应 DTO
-│   │   ├── router/           # 路由注册
-│   │   ├── asr/              # ASR 客户端
-│   │   ├── ffmpeg/           # FFmpeg 本地执行器
-│   │   ├── repair/           # 去马赛克执行器
-│   │   ├── upscale/          # 清晰度增强执行器
-│   │   ├── subtitle/         # 字幕解析
-│   │   ├── scanner/          # 视频目录扫描器
-│   │   └── scheduler/        # 任务调度器
-│   ├── enum/                 # 业务错误码
-│   └── utils/                # 日志、响应封装
-├── frontend/
-│   ├── src/
-│   │   ├── api/              # 接口请求封装
-│   │   ├── views/            # 页面（视频/任务/设置）
-│   │   ├── stores/           # Pinia 状态
-│   │   ├── router/           # 路由
-│   │   └── utils/            # 工具函数
-│   └── vite.config.ts        # 含 /api 代理配置
-├── Dockerfile                # 多阶段构建
-└── LICENSE
+	videoFlow/
+	├── backend/
+	│   ├── cmd/api/              # 程序入口 main.go
+	│   ├── bootstrap/            # 配置、DB、ASR、FFmpeg、去马赛克 等初始化
+	│   ├── config/               # 配置文件（config.yaml.local 为模板）
+	│   ├── internal/
+	│   │   ├── controller/       # HTTP 控制器
+	│   │   ├── logic/            # 业务逻辑
+	│   │   ├── model/            # 数据模型与持久化（GORM）
+	│   │   ├── dto/              # 请求/响应 DTO
+	│   │   ├── router/           # 路由注册
+	│   │   ├── asr/              # ASR 客户端
+	│   │   ├── ffmpeg/           # FFmpeg 本地执行器
+	│   │   ├── repair/           # 去马赛克执行器
+	│   │   ├── upscale/          # 清晰度增强执行器
+	│   │   ├── subtitle/         # 字幕解析
+	│   │   ├── scanner/          # 视频目录扫描器
+	│   │   └── scheduler/        # 任务调度器
+	│   ├── enum/                 # 业务错误码
+	│   └── utils/                # 日志、响应封装
+	├── frontend/
+	│   ├── src/
+	│   │   ├── api/              # 接口请求封装
+	│   │   ├── views/            # 页面（视频/任务/设置/下载）
+	│   │   ├── components/       # 通用组件（VfListPanel）
+	│   │   ├── composables/      # 响应式等组合式函数
+	│   │   ├── stores/           # Pinia 状态
+	│   │   ├── router/           # 路由
+	│   │   └── utils/            # 工具函数
+	│   └── vite.config.ts        # 含 /api 代理配置
+	├── Dockerfile                # 多阶段构建
+	└── LICENSE
 ```
 
 ## 🛡️ 注意事项
 
 - **FFmpeg 必需**：`ffmpeg.provider` 固定为 `local`，镜像已内置 ffmpeg；本地源码运行需自行安装
 - **任务输出需要可写目录**：Docker 部署时务必挂载可写的输出目录（如 `/output`）并配置 `output.dir`；未配置时产物会写到视频所在目录旁的子目录，输入目录为只读挂载时将写失败
-- **去马赛克 / 清晰度增强需 Docker**：容器部署时需挂载宿主机 Docker socket；不用该功能可忽略，不影响服务启动
+- **去马赛克 / 清晰度增强 / 视频下载需 Docker**：容器部署时需挂载宿主机 Docker socket；yt-dlp 也依赖 Docker 环境自动检测安装。不用这些功能可忽略，不影响服务启动
 - **首次使用需初始化**：浏览器首次访问会引导初始化管理员账号，登录后才能使用业务功能
 - **ASR 服务需自备**：请自行部署 [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice)，并配置 `asr.url`
 - **数据库持久化**：默认 `data/app.db`，Docker 部署时务必挂载 `/app/data` 目录，否则重启丢数据
@@ -469,20 +506,33 @@ videoFlow/
 
 </details>
 
+<details>
+<summary><b>yt-dlp 下载功能不可用？</b></summary>
+
+视频下载依赖 yt-dlp。Docker 部署时需挂载宿主机 Docker socket（`-v /var/run/docker.sock:/var/run/docker.sock`），系统会自动检测并引导安装；本地源码运行需自行安装 yt-dlp（`brew install yt-dlp` 或 `pip install yt-dlp`）。
+
+</details>
+
 ## 🗺️ Roadmap
 
 **✅ 已实现**
 
+- 视频下载（yt-dlp 内置管理，支持 YouTube / Bilibili / Twitter / 抖音 / Twitch 等主流平台，进度实时跟踪，自动入库）
 - 视频扫描（手动 / 定时自动）+ 字幕生成（Whisper ASR）
-- 去马赛克（lada）+ 清晰度增强（Video2X）
-- 字幕写入视频（烧录）
-- 任务管理（创建 / 取消 / 失败重试 / 实时进度）
-- 任务调度器（并发控制 / 轮询间隔可配置）
-- 运行时配置在线修改 + 持久化（SQLite）
-- 组件管理（检测与安装：Docker / FFmpeg / Whisper ASR / lada / Video2X）
-- 用户认证（登录 / 初始化 / 修改密码）
+- 字幕写入视频（烧录），三级字幕查找机制（已完成记录 → 输出目录 SRT → 自动生成）
+- 去马赛克（lada）+ 清晰度增强（Video2X，支持处理器 / 模型 / 降噪等级按任务指定）
+- 任务源视频选择（可指定派生视频作为处理源）+ 覆写模式（输出覆盖源文件）
+- 任务管理（创建 / 取消 / 失败重试 / 批量删除 + 删除输出文件 / 实时进度）
+- 任务调度器（按类型独立并发控制 / 轮询间隔可配置 / 运行时调整）
+- 运行时配置在线修改 + 持久化（SQLite），覆盖 ASR / 去马赛克 / 清晰度增强 / 各类并发数 / 轮询间隔
+- 组件管理（检测与安装：Docker / FFmpeg / Whisper ASR / lada / Video2X / yt-dlp，SSE 进度推送，安装历史追溯）
+- 用户认证（登录 / 初始化 / 修改密码 / 密码重置）
 - Docker 部署 + 端口运行时指定 + 多架构镜像（amd64 + arm64 原生支持）
 - FFmpeg 智能本地调用
+- 暗色 / 亮色主题切换
+- 四语言国际化（简体中文 / 繁體中文 / English / 日本語）
+- 响应式布局（桌面 / 平板 / 移动端自适应）
+- 调度优化：优雅关闭（重启时运行中任务自动标记失败）
 
 ## 💌 致谢
 
@@ -492,6 +542,7 @@ videoFlow/
 - **[FFmpeg](https://ffmpeg.org/)** - 强大的音视频处理工具，负责音频提取与时长探测。
 - **[ladaapp/lada](https://github.com/ladaapp/lada)** - 去马赛克 Docker 镜像。
 - **[Video2X](https://github.com/k4yt3x/video2x)** - 视频清晰度增强 Docker 镜像。
+- **[yt-dlp](https://github.com/yt-dlp/yt-dlp)** - 功能强大的视频下载引擎，支持数百个视频网站。
 - **[Gin](https://github.com/gin-gonic/gin)** / **[GORM](https://github.com/go-gorm/gorm)** / **[Viper](https://github.com/spf13/viper)** / **[Zap](https://github.com/uber-go/zap)** - 优秀的 Go 基础库。
 - **[Vue 3](https://vuejs.org/)** / **[Element Plus](https://element-plus.org/)** / **[Vite](https://vite.dev/)** - 前端基石。
 

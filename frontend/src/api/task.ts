@@ -3,7 +3,7 @@ import type { ComponentType } from './component'
 import type { Video } from './video'
 
 // 任务类型
-export type TaskType = 'subtitle' | 'subtitle_burn' | 'deblur' | 'upscale'
+export type TaskType = 'subtitle' | 'subtitle_burn' | 'deblur' | 'upscale' | 'download'
 
 // 创建任务所需的组件（与后端 component.TaskTypeDependencies 保持一致）
 export const TASK_REQUIRED_COMPONENTS: Record<TaskType, ComponentType[]> = {
@@ -11,6 +11,7 @@ export const TASK_REQUIRED_COMPONENTS: Record<TaskType, ComponentType[]> = {
   subtitle_burn: ['ffmpeg'],
   deblur: ['docker', 'lada'],
   upscale: ['docker', 'video2x'],
+  download: ['yt-dlp'],
 }
 
 // 任务状态
@@ -107,11 +108,13 @@ export function createTask(
  * @param page 页码
  * @param pageSize 每页数量
  * @param type 任务类型过滤
+ * @param sortBy 排序字段，目前支持 'created_at'、'updated_at'；为空时按运行中优先+创建时间倒序
+ * @param order 排序方向：'asc' 正序 / 'desc' 倒序
  */
-export function listTasks(page: number, pageSize: number, type?: TaskType): Promise<TaskListRes> {
+export function listTasks(page: number, pageSize: number, type?: TaskType, sortBy?: string, order?: 'asc' | 'desc'): Promise<TaskListRes> {
   return request
     .get<ApiResponse<TaskListRes>>('/api/v1/tasks', {
-      params: { page, page_size: pageSize, task_type: type },
+      params: { page, page_size: pageSize, task_type: type, sort_by: sortBy, order },
     })
     .then((res) => res.data.data)
 }

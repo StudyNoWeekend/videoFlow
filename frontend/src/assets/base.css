@@ -95,6 +95,31 @@
   --vf-glow-cyan: 0 0 8px rgba(8, 145, 178, 0.25);
 }
 
+/* ========== 响应式间距变量 ========== */
+:root {
+  --vf-padding-page: 20px;
+  --vf-padding-panel: 16px;
+  --vf-gap-content: 16px;
+  --vf-side-rail-width: 72px;
+}
+
+@media (max-width: 1023px) {
+  :root {
+    --vf-padding-page: 16px;
+    --vf-padding-panel: 12px;
+    --vf-gap-content: 12px;
+  }
+}
+
+@media (max-width: 767px) {
+  :root {
+    --vf-padding-page: 12px;
+    --vf-padding-panel: 10px;
+    --vf-gap-content: 10px;
+    --vf-side-rail-width: 0px;
+  }
+}
+
 *,
 *::before,
 *::after {

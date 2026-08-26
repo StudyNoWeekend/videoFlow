@@ -111,7 +111,7 @@ onMounted(async () => {
                     </el-radio-group>
                   </el-form-item>
                   <el-form-item :label="$t('settings.label.asr_output')">
-                    <el-select v-model="form.asr_output" style="width: 200px">
+                    <el-select v-model="form.asr_output" style="width:100%">
                       <el-option label="JSON" value="json" />
                       <el-option label="SRT" value="srt" />
                       <el-option label="VTT" value="vtt" />
@@ -224,7 +224,7 @@ onMounted(async () => {
 
 <style scoped>
 .settings-view {
-  padding: 20px;
+  padding: var(--vf-padding-page);
   min-height: 100%;
 }
 
@@ -232,6 +232,12 @@ onMounted(async () => {
   min-height: calc(100vh - 92px);
   display: flex;
   flex-direction: column;
+}
+
+@media (max-width: 767px) {
+  .vf-panel {
+    min-height: calc(100vh - 52px - 56px);
+  }
 }
 
 .header__hint {
@@ -242,11 +248,24 @@ onMounted(async () => {
 
 .settings-tabs {
   padding: 0 16px;
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-tabs :deep(.el-tabs__content) {
+  flex: 1;
+  overflow: hidden;
+}
+
+.settings-tabs :deep(.el-tab-pane) {
+  height: 100%;
+  overflow-y: auto;
 }
 
 .panel-body {
   padding: 16px 0;
-  flex: 1;
 }
 
 .config-form :deep(.el-form-item__label) {
@@ -254,6 +273,37 @@ onMounted(async () => {
   font-family: var(--vf-font-display);
   font-weight: 500;
   letter-spacing: 0.02em;
+}
+
+/* 手机端：标签放在输入框上方 */
+@media (max-width: 767px) {
+  .config-form :deep(.el-form-item) {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .config-form :deep(.el-form-item__label) {
+    padding-bottom: 4px;
+    justify-content: flex-start;
+  }
+  .config-form :deep(.el-form-item__content) {
+    flex: none;
+    width: 100%;
+    /* 抵消 Element Plus 对无 label 表单项注入的 margin-left: label-width，否则内容会溢出视口 */
+    margin-left: 0 !important;
+  }
+  .config-form :deep(.el-radio-group) {
+    flex-wrap: wrap;
+  }
+  .config-form :deep(.el-slider__runway) {
+    width: calc(100% - 150px);
+  }
+}
+
+.config-form {
+  /* 宽屏下表单约束最大宽度并水平居中，窄屏自适应收缩 */
+  max-width: 900px;
+  margin: 0 auto;
 }
 
 .config-section {
@@ -296,6 +346,35 @@ onMounted(async () => {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+/* 两列网格下防止内容溢出 */
+.section-grid--2 :deep(.el-form-item) {
+  min-width: 0;
+}
+
+.section-grid--2 :deep(.el-form-item__content) {
+  min-width: 0;
+}
+
+.section-grid--2 :deep(.el-select),
+.section-grid--2 :deep(.el-slider),
+.section-grid--2 :deep(.el-input-number) {
+  width: 100%;
+}
+
+.section-grid--2 :deep(.el-radio-group) {
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
+.section-grid--2 :deep(.el-radio-button__inner) {
+  font-size: 12px;
+  padding: 6px 10px;
+}
+
+.section-grid--2 :deep(.el-slider__runway) {
+  width: calc(100% - 150px);
+}
+
 .checkbox-group {
   display: flex;
   flex-direction: column;
@@ -311,6 +390,16 @@ onMounted(async () => {
 
 .form-actions :deep(.el-form-item__content) {
 	justify-content: flex-end;
+}
+
+/* 手机端：保存按钮通栏居中，保证始终可见 */
+@media (max-width: 767px) {
+  .form-actions :deep(.el-form-item__content) {
+    justify-content: center;
+  }
+  .form-actions :deep(.el-button) {
+    width: 100%;
+  }
 }
 
 .vf-field-hint {

@@ -3,16 +3,18 @@ import { RouterView, RouterLink, useRoute, useRouter } from 'vue-router'
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { elementPlusLocales } from '@/i18n'
+import { i18n, elementPlusLocales } from '@/i18n'
 import { useAuthStore } from '@/stores/auth'
 import { changePassword } from '@/api/auth'
 import { getVersion } from '@/api/version'
 import { validatePassword } from '@/utils/validate'
+import { useResponsive } from '@/composables/useResponsive'
 
 const route = useRoute()
 const router = useRouter()
 const { t, locale } = useI18n()
 const auth = useAuthStore()
+const { isMobileOnly, isMobileOrTablet } = useResponsive()
 
 // 应用版本号，从后端获取
 const appVersion = ref('')
@@ -22,11 +24,12 @@ const isPublicPage = computed(() => {
   return route.meta?.public === true
 })
 
-const menuItems = computed(() => [
-  { name: 'videos', label: t('nav.videos'), icon: 'VideoCamera', code: t('nav.code.videos') },
-  { name: 'tasks', label: t('nav.tasks'), icon: 'List', code: t('nav.code.tasks') },
-  { name: 'settings', label: t('nav.settings'), icon: 'Setting', code: t('nav.code.settings') },
-])
+	const menuItems = computed(() => [
+	  { name: 'videos', label: t('nav.videos'), icon: 'VideoCamera', code: t('nav.code.videos') },
+	  { name: 'tasks', label: t('nav.tasks'), icon: 'List', code: t('nav.code.tasks') },
+	  { name: 'downloads', label: t('nav.downloads'), icon: 'Download', code: t('nav.code.downloads') },
+	  { name: 'settings', label: t('nav.settings'), icon: 'Setting', code: t('nav.code.settings') },
+	])
 
 // i18n locale -> BCP 47 tag for date/time formatting
 const dateTimeLocaleMap: Record<string, string> = {
@@ -64,6 +67,14 @@ const langLabels: Record<string, string> = {
   ja: '日本語',
 }
 const currentLangLabel = computed(() => langLabels[locale.value] || '简体中文')
+
+// 切换语言（显式操作全局 i18n locale）
+function switchLanguage(lang: string): void {
+  const langKey = lang as 'zh' | 'zh-TW' | 'en' | 'ja'
+  i18n.global.locale.value = langKey
+  locale.value = langKey
+  localStorage.setItem('videoflow-lang', lang)
+}
 
 // ---- 用户菜单 ----
 const userDropdownVisible = ref(false)
@@ -179,9 +190,9 @@ async function handleChangePwd(): Promise<void> {
           <div class="status-bar__brand">
             <div class="brand-logo">
               <span class="brand-logo__mark">VF</span>
-              <span class="brand-logo__text">VideoFlow</span>
+              <span class="brand-logo__text hide-mobile">VideoFlow</span>
             </div>
-            <span class="status-bar__version">{{ appVersion }}</span>
+            <span class="status-bar__version hide-mobile">{{ appVersion }}</span>
           </div>
 
           <div class="status-bar__actions">
@@ -189,11 +200,11 @@ async function handleChangePwd(): Promise<void> {
               <el-icon size="16">
                 <component :is="themeIcon" />
               </el-icon>
-              <span class="theme-toggle__label">{{ themeLabel }}</span>
+              <span class="theme-toggle__label hide-mobile">{{ themeLabel }}</span>
             </button>
 
             <!-- 语言切换 -->
-            <el-dropdown trigger="click" @command="(lang: string) => { locale.value = lang as 'zh' | 'zh-TW' | 'en' | 'ja'; localStorage.setItem('videoflow-lang', lang); }">
+            <el-dropdown trigger="click" @command="switchLanguage">
               <button class="lang-toggle">
                 <el-icon size="16"><Global /></el-icon>
                 <span class="lang-toggle__label">{{ currentLangLabel }}</span>
@@ -213,7 +224,7 @@ async function handleChangePwd(): Promise<void> {
             <el-dropdown trigger="click" @command="(cmd: string) => { if (cmd === 'change-pwd') openChangePwdDialog(); if (cmd === 'logout') handleLogout(); }">
               <button class="user-menu">
                 <el-icon size="16"><User /></el-icon>
-                <span class="user-menu__name">{{ auth.user?.username || 'User' }}</span>
+                <span class="user-menu__name hide-mobile">{{ auth.user?.username || 'User' }}</span>
                 <el-icon size="12"><ArrowDown /></el-icon>
               </button>
               <template #dropdown>
@@ -231,14 +242,14 @@ async function handleChangePwd(): Promise<void> {
             </el-dropdown>
 
             <div class="status-bar__clock">
-              <span class="clock__date">{{ dateString }}</span>
+              <span class="clock__date hide-mobile">{{ dateString }}</span>
               <span class="clock__time">{{ timeString }}</span>
             </div>
           </div>
         </header>
 
         <div class="workbench__body">
-          <!-- 侧边导航 -->
+          <!-- 侧边导航（桌面端/平板端） -->
           <aside class="side-rail">
             <nav class="rail-menu">
               <RouterLink
@@ -248,15 +259,14 @@ async function handleChangePwd(): Promise<void> {
                 class="rail-item"
                 :class="{ active: route.name === item.name }"
               >
-                <div class="rail-item__code">{{ item.code }}</div>
+                <div class="rail-item__code hide-tablet">{{ item.code }}</div>
                 <el-icon size="20">
                   <component :is="item.icon" />
                 </el-icon>
-                <span class="rail-item__label">{{ item.label }}</span>
+                <span class="rail-item__label hide-mobile">{{ item.label }}</span>
                 <span v-if="route.name === item.name" class="rail-item__active-bar"></span>
               </RouterLink>
             </nav>
-
           </aside>
 
           <!-- 主内容区 -->
@@ -264,6 +274,22 @@ async function handleChangePwd(): Promise<void> {
             <RouterView />
           </main>
         </div>
+
+        <!-- 底部导航（手机端 < 768px） -->
+        <nav class="bottom-nav">
+          <RouterLink
+            v-for="item in menuItems"
+            :key="item.name"
+            :to="{ name: item.name }"
+            class="bottom-nav__item"
+            :class="{ active: route.name === item.name }"
+          >
+            <el-icon size="20">
+              <component :is="item.icon" />
+            </el-icon>
+            <span class="bottom-nav__label">{{ item.label }}</span>
+          </RouterLink>
+        </nav>
 
         <!-- 修改密码对话框 -->
         <el-dialog
@@ -316,8 +342,6 @@ async function handleChangePwd(): Promise<void> {
 </template>
 
 <style scoped>
-/* (所有原有样式保持不变，新加用户菜单样式) */
-
 .workbench {
   display: flex;
   flex-direction: column;
@@ -338,6 +362,12 @@ async function handleChangePwd(): Promise<void> {
   flex-shrink: 0;
   position: relative;
   z-index: 10;
+}
+
+@media (max-width: 767px) {
+  .status-bar {
+    padding: 0 12px;
+  }
 }
 
 .status-bar::after {
@@ -402,6 +432,12 @@ async function handleChangePwd(): Promise<void> {
   gap: 16px;
 }
 
+@media (max-width: 767px) {
+  .status-bar__actions {
+    gap: 8px;
+  }
+}
+
 .theme-toggle {
   display: flex;
   align-items: center;
@@ -417,6 +453,12 @@ async function handleChangePwd(): Promise<void> {
   letter-spacing: 0.04em;
   cursor: pointer;
   transition: all 0.2s ease;
+}
+
+@media (max-width: 767px) {
+  .theme-toggle {
+    padding: 6px 8px;
+  }
 }
 
 .theme-toggle:hover {
@@ -447,6 +489,12 @@ async function handleChangePwd(): Promise<void> {
   transition: all 0.2s ease;
 }
 
+@media (max-width: 767px) {
+  .lang-toggle {
+    padding: 6px 8px;
+  }
+}
+
 .lang-toggle:hover {
   border-color: var(--vf-accent);
   color: var(--vf-accent);
@@ -475,6 +523,12 @@ async function handleChangePwd(): Promise<void> {
   transition: all 0.2s ease;
 }
 
+@media (max-width: 767px) {
+  .user-menu {
+    padding: 6px 8px;
+  }
+}
+
 .user-menu:hover {
   border-color: var(--vf-accent);
   color: var(--vf-accent);
@@ -492,6 +546,12 @@ async function handleChangePwd(): Promise<void> {
   align-items: center;
   gap: 12px;
   font-family: var(--vf-font-mono);
+}
+
+@media (max-width: 767px) {
+  .status-bar__clock {
+    gap: 6px;
+  }
 }
 
 .clock__date {
@@ -515,13 +575,32 @@ async function handleChangePwd(): Promise<void> {
 
 /* 侧边栏 */
 .side-rail {
-  width: 72px;
+  width: var(--vf-side-rail-width);
   background: var(--vf-bg-elevated);
   border-right: 1px solid var(--vf-border);
   display: flex;
   flex-direction: column;
   justify-content: space-between;
   flex-shrink: 0;
+  transition: width 0.2s ease;
+}
+
+/* 平板端（768~1023px）：侧栏折叠为图标模式，hover 展开 */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .side-rail {
+    width: 56px;
+    overflow: hidden;
+  }
+  .side-rail:hover {
+    width: 160px;
+  }
+}
+
+/* 手机端（< 768px）：侧栏完全隐藏 */
+@media (max-width: 767px) {
+  .side-rail {
+    display: none;
+  }
 }
 
 .rail-menu {
@@ -541,6 +620,35 @@ async function handleChangePwd(): Promise<void> {
   color: var(--vf-text-muted);
   text-decoration: none;
   transition: all 0.2s ease;
+}
+
+/* 平板 hover 展开时，侧栏项改为水平布局 */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .rail-item {
+    flex-direction: row;
+    gap: 10px;
+    padding: 12px 16px;
+    justify-content: flex-start;
+  }
+  .rail-item__code {
+    display: none;
+  }
+  .rail-item__label {
+    display: none;
+  }
+  .side-rail:hover .rail-item__label {
+    display: block;
+    white-space: nowrap;
+  }
+  .side-rail:hover .rail-item {
+    flex-direction: row;
+  }
+  .rail-item__active-bar {
+    display: none;
+  }
+  .side-rail:hover .rail-item__active-bar {
+    display: block;
+  }
 }
 
 .rail-item:hover {
@@ -612,13 +720,71 @@ async function handleChangePwd(): Promise<void> {
 /* 主舞台 */
 .main-stage {
   flex: 1;
-  overflow: auto;
+  overflow-y: auto;
+  /* 禁止整页横向滑动，避免内容被滑出视口；超宽内容由各组件内部滚动 */
+  overflow-x: hidden;
   position: relative;
   background-color: var(--vf-bg);
+}
+
+@media (max-width: 767px) {
+  .main-stage {
+    padding-bottom: 64px; /* 底部导航预留空间 */
+  }
 }
 
 .main-stage > :deep(*) {
   position: relative;
   z-index: 1;
+}
+
+/* ===== 底部导航栏（手机端 < 768px） ===== */
+.bottom-nav {
+  display: none;
+}
+
+@media (max-width: 767px) {
+  .bottom-nav {
+    display: flex;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 56px;
+    background: var(--vf-bg-elevated);
+    border-top: 1px solid var(--vf-border);
+    align-items: center;
+    justify-content: space-around;
+    z-index: 100;
+    padding: 0 4px;
+    padding-bottom: env(safe-area-inset-bottom, 0);
+  }
+}
+
+.bottom-nav__item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 12px;
+  color: var(--vf-text-muted);
+  text-decoration: none;
+  transition: all 0.2s ease;
+  border-radius: var(--vf-radius);
+}
+
+.bottom-nav__item.active {
+  color: var(--vf-accent);
+}
+
+.bottom-nav__item:hover {
+  color: var(--vf-text-secondary);
+}
+
+.bottom-nav__label {
+  font-family: var(--vf-font-ui);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.03em;
 }
 </style>

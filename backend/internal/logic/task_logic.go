@@ -199,6 +199,8 @@ func (l *TaskLogic) ListTasks(ctx context.Context, listReq *req.TaskListReq) (*r
 		Page:     page,
 		PageSize: pageSize,
 		TaskType: listReq.TaskType,
+		SortBy:   listReq.SortBy,
+		Order:    listReq.Order,
 	})
 	if err != nil {
 		return nil, enum.ErrDatabase.WithMsg(fmt.Sprintf("查询任务列表失败: %v", err))

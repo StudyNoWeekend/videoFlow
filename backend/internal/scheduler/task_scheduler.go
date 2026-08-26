@@ -812,6 +812,16 @@ func (s *TaskScheduler) processSubtitleBurnTask(ctx context.Context, task *model
 	//    不再生成 <base>_subtitled 新文件；原视频始终生成新文件。
 	videoExt := filepath.Ext(video.Path)
 	overwrite := task.Overwrite && sourcePath != video.Path
+	if overwrite && !canOverwriteSource(sourcePath, outputDir) {
+		// 处理源可能来自旧版输入树位置（历史任务），原地覆盖会把产物写回输入目录：
+		// 降级为在输出目录生成独立产物文件
+		logger.Logger.Warn("处理源不在当前输出目录，跳过覆盖并生成独立产物",
+			zap.String("task_id", task.ID),
+			zap.String("source_path", sourcePath),
+			zap.String("output_dir", outputDir),
+		)
+		overwrite = false
+	}
 	subtitledPath := filepath.Join(outputDir, baseName+"_subtitled"+videoExt)
 	burnPath := subtitledPath
 	if overwrite {
@@ -963,8 +973,18 @@ func (s *TaskScheduler) processRepairTask(ctx context.Context, task *model.Task,
 	}
 
 	// 覆盖模式（选择了衍生视频）：用本次去马赛克产物替换处理源文件本身，
-	// 不再保留单独的 repaired 新文件
-	if task.Overwrite && sourcePath != video.Path {
+	// 不再保留单独的 repaired 新文件；处理源已不在当前输出目录时（历史任务）
+	// 跳过覆盖，产物保留在输出目录
+	overwrite := task.Overwrite && sourcePath != video.Path
+	if overwrite && !canOverwriteSource(sourcePath, outputDir) {
+		logger.Logger.Warn("处理源不在当前输出目录，跳过覆盖并保留独立产物",
+			zap.String("task_id", task.ID),
+			zap.String("source_path", sourcePath),
+			zap.String("output_dir", outputDir),
+		)
+		overwrite = false
+	}
+	if overwrite {
 		produced := findNewOutputVideo(outputDir, out.snapshotFiles)
 		if produced == "" {
 			s.markFailed(ctx, task, fmt.Errorf("去马赛克完成但未找到输出文件，无法覆盖处理源文件"))
@@ -1078,8 +1098,18 @@ func (s *TaskScheduler) processUpscaleTask(ctx context.Context, task *model.Task
 	}
 
 	// 覆盖模式（选择了衍生视频）：用清晰度修复产物替换处理源文件本身，
-	// 不再保留单独的 upscaled 新文件（产物与源文件同目录，rename 原子）
-	if task.Overwrite && sourcePath != video.Path {
+	// 不再保留单独的 upscaled 新文件（产物与源文件同目录，rename 原子）；
+	// 处理源已不在当前输出目录时（历史任务）跳过覆盖，产物保留在输出目录
+	overwrite := task.Overwrite && sourcePath != video.Path
+	if overwrite && !canOverwriteSource(sourcePath, outputDir) {
+		logger.Logger.Warn("处理源不在当前输出目录，跳过覆盖并保留独立产物",
+			zap.String("task_id", task.ID),
+			zap.String("source_path", sourcePath),
+			zap.String("output_dir", outputDir),
+		)
+		overwrite = false
+	}
+	if overwrite {
 		if output == "" {
 			s.markFailed(ctx, task, fmt.Errorf("清晰度修复完成但未找到输出文件，无法覆盖处理源文件"))
 			return

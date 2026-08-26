@@ -8,13 +8,16 @@ import type { TaskType } from '@/api/task'
 import type { Video, TaskSnapshot, DirFile } from '@/api/video'
 import SourceSelectDialog, { type SourceSelectOption } from '@/components/SourceSelectDialog.vue'
 import UpscaleDialog from '@/components/UpscaleDialog.vue'
+import VfListPanel from '@/components/VfListPanel.vue'
 import { useSettingsStore } from '@/stores/settings'
 import { useComponentStore } from '@/stores/component'
 import { formatFileSize } from '@/utils/format'
+import { useResponsive } from '@/composables/useResponsive'
 
 const { t } = useI18n()
 const settingsStore = useSettingsStore()
 const componentStore = useComponentStore()
+const { isMobileOnly, isMobileOrTablet, isDesktop } = useResponsive()
 
 const scanPath = ref<string>('')
 const loading = ref<boolean>(false)
@@ -166,7 +169,7 @@ async function handleBatchDelete(): Promise<void> {
   const ids = selectedVideos.value.map((v) => v.id)
   if (ids.length === 0) return
 
-  // 在确认弹窗中提供“同时删除输出文件”勾选项，由用户决定删除范围
+  // 在确认弹窗中提供"同时删除输出文件"勾选项，由用户决定删除范围
   const checkboxId = 'video-batch-delete-files'
   let confirmed = false
   try {
@@ -252,7 +255,7 @@ async function handleSubtitle(video: Video): Promise<void> {
 }
 
 // 点击非字幕任务时实时扫描输出目录中的衍生视频（含历史/旧版本产物），
-// 用作处理源选择；不依赖视频列表缓存快照，扫描失败按“无衍生视频”处理
+// 用作处理源选择；不依赖视频列表缓存快照，扫描失败按"无衍生视频"处理
 async function loadDerivedVideos(video: Video): Promise<DirFile[]> {
   try {
     const files = await listDirFiles(video.id)
@@ -395,13 +398,13 @@ function taskStatusText(task?: TaskSnapshot): string {
 }
 
 // 输出文件类型标签配置
-	const fileTypeLabels: Record<string, { label: string; tag: string }> = {
-		  subtitle:        { label: 'videos.file.subtitle',        tag: 'primary' },
-		  subtitled_video: { label: 'videos.file.subtitled_video', tag: 'warning' },
-		  repaired_video:  { label: 'videos.file.repaired_video',  tag: 'danger' },
-		  upscaled_video:  { label: 'videos.file.upscaled_video',  tag: 'success' },
-		  unknown:         { label: 'videos.file.unknown',         tag: 'info' },
-		}
+const fileTypeLabels: Record<string, { label: string; tag: string }> = {
+  subtitle:        { label: 'videos.file.subtitle',        tag: 'primary' },
+  subtitled_video: { label: 'videos.file.subtitled_video', tag: 'warning' },
+  repaired_video:  { label: 'videos.file.repaired_video',  tag: 'danger' },
+  upscaled_video:  { label: 'videos.file.upscaled_video',  tag: 'success' },
+  unknown:         { label: 'videos.file.unknown',         tag: 'info' },
+}
 
 function getFileTypeLabel(file: { file_type: string }): string {
   return fileTypeLabels[file.file_type]?.label ?? 'videos.file.unknown'
@@ -463,140 +466,134 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="videos-view">
-    <div class="vf-panel">
-      <div class="vf-panel__footer"></div>
-
-      <!-- 面板标题 / 扫描控制 -->
-      <div class="vf-panel-header">
-        <div class="vf-panel-header__title">
-          <span class="vf-led vf-led--amber vf-led--pulse"></span>
-          <span>{{ $t('videos.title') }}</span>
-          <span class="header__count">{{ $t('videos.count', { count: total }) }}</span>
-        </div>
-
+  <div class="videos-view responsive-page">
+    <VfListPanel
+      :title="$t('videos.title')"
+      :count="total"
+      :loading="loading"
+      :total="total"
+      :page="page"
+      :page-size="pageSize"
+      :page-sizes="isMobileOrTablet ? [12, 24, 48] : [12, 24, 48, 96]"
+      :polling-interval="pollingInterval"
+      :polling-options="pollingOptions"
+      :show-polling="true"
+      @page-change="handlePageChange"
+      @size-change="handleSizeChange"
+      @update:polling-interval="handlePollingChange"
+      @refresh="loadVideos"
+    >
+      <template #header-extra>
         <div class="scan-control">
           <el-input
             v-model="scanPath"
             :placeholder="$t('videos.scan.placeholder')"
             clearable
-            style="width: 380px"
+            class="scan-input"
             @keyup.enter="handleScan"
           />
           <el-button type="primary" :loading="scanning" @click="handleScan">
-            <el-icon><Search /></el-icon>{{ $t('videos.scan') }}
+            <el-icon><Search /></el-icon>
+            <span class="hide-mobile">{{ $t('videos.scan') }}</span>
           </el-button>
           <el-button @click="loadVideos">
-            <el-icon><Refresh /></el-icon>{{ $t('videos.refresh') }}
+            <el-icon><Refresh /></el-icon>
+            <span class="hide-mobile">{{ $t('videos.refresh') }}</span>
           </el-button>
         </div>
-      </div>
+      </template>
 
-      <div class="panel-toolbar">
-        <div class="toolbar-left">
-          <el-button
-            type="danger"
-            size="small"
-            :disabled="selectedVideos.length === 0"
-            @click="handleBatchDelete"
-          >
-            <el-icon><Delete /></el-icon>{{ $t('videos.batch_delete') }}<span v-if="selectedVideos.length" class="batch-count">{{ selectedVideos.length }}</span>
-          </el-button>
-        </div>
-        <div class="toolbar-right">
-          <div class="poll-control">
-            <span class="vf-data-label">{{ $t('videos.polling.label') }}</span>
-            <el-select v-model="pollingInterval" size="small" style="width: 110px" @change="handlePollingChange">
-              <el-option
-                v-for="opt in pollingOptions"
-                :key="opt.value"
-                :label="$t(opt.label)"
-                :value="opt.value"
-              />
-            </el-select>
-            <span v-if="pollingInterval > 0" class="vf-led vf-led--green vf-led--pulse"></span>
-          </div>
-        </div>
-      </div>
-
-      <div class="panel-body panel-body--compact">
-        <el-table
-          v-loading="loading"
-          :data="videoList"
-          style="width: 100%"
-          empty-text=""
-          @selection-change="handleSelectionChange"
+      <template #toolbar-left>
+        <el-button
+          type="danger"
+          size="small"
+          :disabled="selectedVideos.length === 0"
+          @click="handleBatchDelete"
         >
-          <el-table-column type="selection" width="45" />
+          <el-icon><Delete /></el-icon>{{ $t('videos.batch_delete') }}<span v-if="selectedVideos.length" class="batch-count">{{ selectedVideos.length }}</span>
+        </el-button>
+      </template>
 
-          <el-table-column :label="$t('videos.column.name')" min-width="280">
-            <template #default="{ row }">
-              <div class="name-cell">
-                <span class="name-icon">
-                  <el-icon><VideoCamera /></el-icon>
-                </span>
-                <span class="name-text" :title="row.path">{{ row.name }}</span>
-              </div>
-            </template>
-          </el-table-column>
+      <!-- 桌面端/平板端：表格模式 -->
+      <el-table
+        v-if="!isMobileOnly"
+        v-loading="loading"
+        :data="videoList"
+        style="width: 100%"
+        empty-text=""
+        @selection-change="handleSelectionChange"
+        @sort-change="handleSortChange"
+      >
+        <el-table-column type="selection" width="45" />
 
-          <el-table-column :label="$t('videos.column.type')" width="100">
-            <template #default>
-              <el-tag type="primary" size="small">{{ $t('videos.type.video') }}</el-tag>
-            </template>
-          </el-table-column>
+        <el-table-column :label="$t('videos.column.name')" min-width="200">
+          <template #default="{ row }">
+            <div class="name-cell">
+              <span class="name-icon">
+                <el-icon><VideoCamera /></el-icon>
+              </span>
+              <span class="name-text" :title="row.path">{{ row.name }}</span>
+            </div>
+          </template>
+        </el-table-column>
 
-          <el-table-column
-            :label="$t('videos.column.size')"
-            prop="size"
-            sortable="custom"
-            :sort-orders="['ascending', 'descending']"
-            width="110"
-            @sort-change="handleSortChange"
-          >
-            <template #default="{ row }">
-              <span class="size-value">{{ formatFileSize(row.size) }}</span>
-            </template>
-          </el-table-column>
+        <el-table-column v-if="isDesktop || !isMobileOrTablet" :label="$t('videos.column.type')" width="80">
+          <template #default>
+            <el-tag type="primary" size="small">{{ $t('videos.type.video') }}</el-tag>
+          </template>
+        </el-table-column>
 
-          <el-table-column :label="$t('videos.column.subtitle')" width="100">
-            <template #default="{ row }">
-              <div class="status-cell">
-                <span :class="['vf-led', taskStatusLed(row.subtitle_task)]"></span>
-                <span class="status-text">{{ taskStatusText(row.subtitle_task) }}</span>
-              </div>
-            </template>
-          </el-table-column>
+        <el-table-column v-if="!isMobileOnly"
+          :label="$t('videos.column.size')"
+          prop="size"
+          sortable="custom"
+          :sort-orders="['ascending', 'descending']"
+          width="100"
+        >
+          <template #default="{ row }">
+            <span class="size-value">{{ formatFileSize(row.size) }}</span>
+          </template>
+        </el-table-column>
 
-          <el-table-column :label="$t('videos.column.subtitle_burn')" width="100">
-            <template #default="{ row }">
-              <div class="status-cell">
-                <span :class="['vf-led', taskStatusLed(row.subtitle_burn_task)]"></span>
-                <span class="status-text">{{ taskStatusText(row.subtitle_burn_task) }}</span>
-              </div>
-            </template>
-          </el-table-column>
+        <el-table-column v-if="!isMobileOnly" :label="$t('videos.column.subtitle')" width="90">
+          <template #default="{ row }">
+            <div class="status-cell">
+              <span :class="['vf-led', taskStatusLed(row.subtitle_task)]"></span>
+              <span class="status-text">{{ taskStatusText(row.subtitle_task) }}</span>
+            </div>
+          </template>
+        </el-table-column>
 
-          <el-table-column :label="$t('videos.column.deblur')" width="100">
-            <template #default="{ row }">
-              <div class="status-cell">
-                <span :class="['vf-led', taskStatusLed(row.deblur_task)]"></span>
-                <span class="status-text">{{ taskStatusText(row.deblur_task) }}</span>
-              </div>
-            </template>
-          </el-table-column>
+        <el-table-column v-if="isDesktop || !isMobileOrTablet" :label="$t('videos.column.subtitle_burn')" width="90">
+          <template #default="{ row }">
+            <div class="status-cell">
+              <span :class="['vf-led', taskStatusLed(row.subtitle_burn_task)]"></span>
+              <span class="status-text">{{ taskStatusText(row.subtitle_burn_task) }}</span>
+            </div>
+          </template>
+        </el-table-column>
 
-          <el-table-column :label="$t('videos.column.upscale')" width="100">
-            <template #default="{ row }">
-              <div class="status-cell">
-                <span :class="['vf-led', taskStatusLed(row.upscale_task)]"></span>
-                <span class="status-text">{{ taskStatusText(row.upscale_task) }}</span>
-              </div>
-            </template>
-          </el-table-column>
+        <el-table-column v-if="isDesktop || !isMobileOrTablet" :label="$t('videos.column.deblur')" width="80">
+          <template #default="{ row }">
+            <div class="status-cell">
+              <span :class="['vf-led', taskStatusLed(row.deblur_task)]"></span>
+              <span class="status-text">{{ taskStatusText(row.deblur_task) }}</span>
+            </div>
+          </template>
+        </el-table-column>
 
-          <el-table-column :label="$t('videos.column.action')" width="350" fixed="right">
-            <template #default="{ row }">
+        <el-table-column v-if="isDesktop || !isMobileOrTablet" :label="$t('videos.column.upscale')" width="80">
+          <template #default="{ row }">
+            <div class="status-cell">
+              <span :class="['vf-led', taskStatusLed(row.upscale_task)]"></span>
+              <span class="status-text">{{ taskStatusText(row.upscale_task) }}</span>
+            </div>
+          </template>
+        </el-table-column>
+
+        <el-table-column :label="$t('videos.column.action')" min-width="280">
+          <template #default="{ row }">
+            <div class="action-cell">
               <el-button
                 type="primary"
                 size="small"
@@ -634,27 +631,61 @@ onUnmounted(() => {
                 {{ $t('videos.btn.upscale') }}
               </el-button>
               <el-button type="danger" size="small" @click="handleDelete(row)">{{ $t('videos.btn.delete') }}</el-button>
-            </template>
-          </el-table-column>
-
-          <template #empty>
-            <el-empty v-if="!loading" :description="$t('videos.empty')" />
+            </div>
           </template>
-        </el-table>
-      </div>
+        </el-table-column>
 
-      <div class="panel-footer">
-        <el-pagination
-          v-model:current-page="page"
-          v-model:page-size="pageSize"
-          :total="total"
-          :page-sizes="[12, 24, 48, 96]"
-          layout="total, sizes, prev, pager, next"
-          @size-change="handleSizeChange"
-          @current-change="handlePageChange"
-        />
+        <template #empty>
+          <el-empty v-if="!loading" :description="$t('videos.empty')" />
+        </template>
+      </el-table>
+
+      <!-- 手机端（< 480px）：紧凑卡片模式 -->
+      <div v-else class="video-cards">
+        <div v-if="loading" class="mobile-loading">
+          <span class="vf-led vf-led--amber vf-led--pulse"></span>
+          <span>{{ $t('common.loading') }}</span>
+        </div>
+        <div
+          v-for="row in videoList"
+          :key="row.id"
+          class="video-card"
+        >
+          <div class="video-card__name">
+            <el-icon size="12"><VideoCamera /></el-icon>
+            <span class="name-text" :title="row.path">{{ row.name }}</span>
+            <span class="video-card__size">{{ formatFileSize(row.size) }}</span>
+          </div>
+          <div class="video-card__statuses">
+            <span class="card-status-item" :class="{ 'is-done': row.subtitle_task?.status === 'completed' }">
+              <span class="status-label">{{ $t('videos.btn.subtitle') }}</span>
+              <span :class="['vf-led', taskStatusLed(row.subtitle_task)]"></span>
+            </span>
+            <span class="card-status-item" :class="{ 'is-done': row.subtitle_burn_task?.status === 'completed' }">
+              <span class="status-label">{{ $t('videos.btn.subtitle_burn') }}</span>
+              <span :class="['vf-led', taskStatusLed(row.subtitle_burn_task)]"></span>
+            </span>
+            <span class="card-status-item" :class="{ 'is-done': row.deblur_task?.status === 'completed' }">
+              <span class="status-label">{{ $t('videos.btn.deblur') }}</span>
+              <span :class="['vf-led', taskStatusLed(row.deblur_task)]"></span>
+            </span>
+            <span class="card-status-item" :class="{ 'is-done': row.upscale_task?.status === 'completed' }">
+              <span class="status-label">{{ $t('videos.btn.upscale') }}</span>
+              <span :class="['vf-led', taskStatusLed(row.upscale_task)]"></span>
+            </span>
+          </div>
+          <div class="video-card__actions">
+            <el-button size="small" round :disabled="isTaskRunning(row.subtitle_task)" @click="handleSubtitle(row)">{{ $t('videos.btn.subtitle') }}</el-button>
+            <el-button size="small" round :disabled="isTaskRunning(row.deblur_task)" @click="handleDeblur(row)">{{ $t('videos.btn.deblur') }}</el-button>
+            <el-button size="small" round :disabled="isTaskRunning(row.upscale_task)" @click="handleUpscale(row)">{{ $t('videos.btn.upscale') }}</el-button>
+            <el-button size="small" round type="danger" plain @click="handleDelete(row)">{{ $t('videos.btn.delete') }}</el-button>
+          </div>
+        </div>
+        <div v-if="videoList.length === 0 && !loading" class="mobile-empty">
+          <el-empty :description="$t('videos.empty')" />
+        </div>
       </div>
-    </div>
+    </VfListPanel>
 
     <!-- 选择处理源弹窗：存在同名衍生视频时，让用户选择对哪条视频执行任务 -->
     <SourceSelectDialog
@@ -677,24 +708,7 @@ onUnmounted(() => {
 
 <style scoped>
 .videos-view {
-  padding: 20px;
   min-height: 100%;
-}
-
-.vf-panel {
-  min-height: calc(100vh - 92px);
-  display: flex;
-  flex-direction: column;
-}
-
-.header__count {
-  font-family: var(--vf-font-mono);
-  font-size: 11px;
-  color: var(--vf-text-muted);
-  border: 1px solid var(--vf-border);
-  padding: 2px 8px;
-  border-radius: var(--vf-radius-sm);
-  margin-left: 8px;
 }
 
 .scan-control {
@@ -703,24 +717,33 @@ onUnmounted(() => {
   gap: 10px;
 }
 
-.panel-toolbar {
-  padding: 8px 16px;
-  border-bottom: 1px solid var(--vf-border);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+.scan-input {
+  width: 380px;
 }
 
-.toolbar-left {
-  display: flex;
-  align-items: center;
-  gap: 14px;
+@media (max-width: 1023px) {
+  .scan-input {
+    width: 240px;
+  }
 }
 
-.toolbar-right {
-  display: flex;
-  align-items: center;
-  gap: 14px;
+@media (max-width: 767px) {
+  .scan-control {
+    gap: 6px;
+  }
+  .scan-input {
+    width: 160px;
+  }
+}
+
+@media (max-width: 480px) {
+  .scan-control {
+    gap: 4px;
+  }
+  .scan-input {
+    min-width: 100px;
+    flex: 1;
+  }
 }
 
 .batch-count {
@@ -728,20 +751,6 @@ onUnmounted(() => {
   font-size: 11px;
   margin-left: 4px;
   opacity: 0.85;
-}
-
-.poll-control {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.panel-body--compact {
-  padding: 0;
-}
-
-.panel-body--compact :deep(.el-table__header-wrapper) {
-  border-bottom: 1px solid var(--vf-border);
 }
 
 /* ========== 表内单元格样式 ========== */
@@ -788,14 +797,93 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 
-.signal-progress {
-  margin-top: 1px;
+.action-cell {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
 }
 
-.panel-footer {
-  padding: 12px 16px;
-  border-top: 1px solid var(--vf-border);
+/* ========== 手机端卡片模式（< 480px） ========== */
+.video-cards {
   display: flex;
-  justify-content: flex-end;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+}
+
+.mobile-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 40px 0;
+  color: var(--vf-text-muted);
+  font-size: 14px;
+}
+
+.video-card {
+  background: var(--vf-bg-elevated);
+  border: 1px solid var(--vf-border);
+  border-radius: var(--vf-radius);
+  padding: 10px 12px;
+}
+
+.video-card__name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--vf-font-display);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--vf-text-primary);
+  margin-bottom: 6px;
+  overflow: hidden;
+}
+
+.video-card__name .name-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.video-card__size {
+  flex-shrink: 0;
+  font-family: var(--vf-font-mono);
+  font-size: 10px;
+  color: var(--vf-text-muted);
+}
+
+.video-card__statuses {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+
+.card-status-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--vf-text-muted);
+  font-family: var(--vf-font-ui);
+  letter-spacing: 0.02em;
+}
+
+.card-status-item.is-done {
+  color: var(--vf-green);
+}
+
+.video-card__actions {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.mobile-empty {
+  padding: 40px 0;
+  display: flex;
+  justify-content: center;
 }
 </style>

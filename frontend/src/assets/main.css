@@ -266,3 +266,43 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--vf-border-active);
 }
+
+/* ========== 响应式工具类 ========== */
+
+/* 桌面端（>= 1024px）隐藏 */
+@media (min-width: 1024px) {
+  .hide-desktop { display: none !important; }
+}
+
+/* 平板端（< 1024px）隐藏 */
+@media (max-width: 1023px) {
+  .hide-tablet { display: none !important; }
+}
+
+/* 手机端（< 768px）隐藏 */
+@media (max-width: 767px) {
+  .hide-mobile { display: none !important; }
+}
+
+/* 手机端显示（默认隐藏） */
+.show-mobile { display: none !important; }
+@media (max-width: 767px) {
+  .show-mobile { display: initial !important; }
+}
+
+/* 桌面端显示（默认隐藏） */
+.show-desktop { display: none !important; }
+@media (min-width: 1024px) {
+  .show-desktop { display: initial !important; }
+}
+
+/* 响应式内边距 */
+.responsive-padding {
+  padding: var(--vf-padding-page);
+}
+
+/* 响应式页内容器 */
+.responsive-page {
+  padding: var(--vf-padding-page);
+  min-height: 100%;
+}

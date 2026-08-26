@@ -2,6 +2,12 @@ package model
 
 import (
 	"context"
+	"errors"
+
+	"go.uber.org/zap"
+	"gorm.io/gorm"
+
+	"video-captions/utils/logger"
 )
 
 // Setting 运行时配置表，用于持久化前端可实时修改的配置项
@@ -35,12 +41,13 @@ const (
 	SettingKeyUpscaleDockerImage      = "upscale_docker_image"
 	SettingKeyUpscaleDevice           = "upscale_device"
 	SettingKeyUpscaleConcurrency      = "upscale_concurrency"
+	SettingKeyDownloadConcurrency     = "download_concurrency"
 )
 
 // 统一设置项默认值（字符串形式持久化）
 const (
 	DefaultVideoDir          = ""
-	DefaultOutputDir         = ""
+	DefaultOutputDir         = "/output"
 	DefaultScanInterval      = "60"
 	DefaultASRURL            = "http://1.12.70.219:9999/asr"
 	DefaultASRLanguage       = "zh"
@@ -69,11 +76,15 @@ func (Setting) TableName() string {
 	return "settings"
 }
 
-// SettingGet 根据 key 查询配置值，不存在返回空字符串
+// SettingGet 根据 key 查询配置值，不存在返回空字符串。
+// 记录不存在视为未配置；其他查询错误记日志后同样返回空串，避免被误当成"未配置"静默降级。
 func SettingGet(ctx context.Context, key string) string {
 	var s Setting
 	err := DB.WithContext(ctx).Where("key = ?", key).First(&s).Error
 	if err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) && logger.Logger != nil {
+			logger.Logger.Error("读取设置失败", zap.String("key", key), zap.Error(err))
+		}
 		return ""
 	}
 	return s.Value

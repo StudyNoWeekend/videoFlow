@@ -17,6 +17,23 @@ export function formatFileSize(size?: number): string {
 }
 
 /**
+ * 格式化下载速度（字节/秒 -> MB/s）
+ * @param speed 字节/秒
+ */
+export function formatSpeed(speed?: number): string {
+  if (speed === undefined || speed === null || speed <= 0) {
+    return '-'
+  }
+  if (speed >= 1024 * 1024) {
+    return `${(speed / (1024 * 1024)).toFixed(1)} MB/s`
+  }
+  if (speed >= 1024) {
+    return `${(speed / 1024).toFixed(1)} KB/s`
+  }
+  return `${speed} B/s`
+}
+
+/**
  * 格式化时长（秒）
  * @param seconds 秒数
  */

@@ -29,9 +29,17 @@ func TestVideoOutputDir(t *testing.T) {
 	output := "/data/output"
 	video := &Video{Path: filepath.Join(input, "movie.mp4"), Name: "movie.mp4"}
 
-	// 旧行为：未配置 output_dir 时输出到视频所在目录的同名子目录
-	if got := VideoOutputDir(ctx, video); got != filepath.Join(input, "movie") {
+	// 未配置 output_dir（行不存在）：默认输出到 /output，不再落入输入树
+	if got := VideoOutputDir(ctx, video); got != filepath.Join(DefaultOutputDir, "movie") {
 		t.Fatalf("no output_dir: got %s", got)
+	}
+
+	// 行存在但值为空串：同样落 /output
+	if err := SettingSet(ctx, SettingKeyOutputDir, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := VideoOutputDir(ctx, video); got != filepath.Join(DefaultOutputDir, "movie") {
+		t.Fatalf("empty output_dir: got %s", got)
 	}
 
 	// 配置 output_dir 且视频在输入目录根下：output/<base>

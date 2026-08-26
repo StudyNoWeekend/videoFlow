@@ -28,13 +28,14 @@ func NewDetector() *Detector {
 
 // DetectAll 检测所有组件
 func (d *Detector) DetectAll(ctx context.Context) []ComponentInfo {
-	results := make([]ComponentInfo, 0, 5)
+	results := make([]ComponentInfo, 0, 6)
 
 	results = append(results, d.detectDocker(ctx))
 	results = append(results, d.detectFFmpeg(ctx))
 	results = append(results, d.detectWhisperASR(ctx))
 	results = append(results, d.detectLada(ctx))
 	results = append(results, d.detectVideo2X(ctx))
+	results = append(results, d.detectYtDlp(ctx))
 
 	d.mu.Lock()
 	d.cached = results
@@ -64,6 +65,8 @@ func (d *Detector) GetComponentStatus(ctx context.Context, componentType Compone
 		return d.detectLada(ctx)
 	case ComponentVideo2X:
 		return d.detectVideo2X(ctx)
+	case ComponentYtDlp:
+		return d.detectYtDlp(ctx)
 	default:
 		return ComponentInfo{
 			Type:     componentType,
@@ -210,6 +213,24 @@ func (d *Detector) detectVideo2X(ctx context.Context) ComponentInfo {
 		return info
 	}
 
+	info.Status = StatusInstalled
+	return info
+}
+
+func (d *Detector) detectYtDlp(ctx context.Context) ComponentInfo {
+	info := ComponentInfo{
+		Type:        ComponentYtDlp,
+		Name:        "yt-dlp",
+		Description: "Video download tool supporting YouTube, Bilibili, Twitter and many other platforms",
+		NeedsDocker: false,
+	}
+
+	version, err := runCommand(ctx, "yt-dlp", "--version")
+	if err != nil {
+		info.Status = StatusMissing
+		return info
+	}
+	info.Version = strings.TrimSpace(version)
 	info.Status = StatusInstalled
 	return info
 }

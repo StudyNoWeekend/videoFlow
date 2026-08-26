@@ -277,7 +277,8 @@ func (l *SettingLogic) defaultVideoDir() string {
 }
 
 func (l *SettingLogic) defaultOutputDir() string {
-	if bootstrap.Config != nil {
+	// 配置/env 未设置时回退到 /output，与引擎侧 VideoOutputDir 的空值处理保持一致
+	if bootstrap.Config != nil && bootstrap.Config.Output.Dir != "" {
 		return bootstrap.Config.Output.Dir
 	}
 	return model.DefaultOutputDir

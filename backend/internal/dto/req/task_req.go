@@ -26,6 +26,8 @@ type TaskListReq struct {
 	Page     int    `form:"page" binding:"omitempty,gte=1"`
 	PageSize int    `form:"page_size" binding:"omitempty,gte=1,lte=100"`
 	TaskType string `form:"task_type" binding:"omitempty,oneof=subtitle subtitle_burn deblur upscale"`
+	SortBy   string `form:"sort_by" binding:"omitempty"`
+	Order    string `form:"order" binding:"omitempty,oneof=asc desc"`
 }
 
 // TaskBatchDeleteReq 任务批量删除请求

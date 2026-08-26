@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { useComponentStore } from '@/stores/component'
 import { getActiveSession, getInstallHistory } from '@/api/component'
 import type { ComponentInfo, ComponentInstallReq } from '@/api/component'
+import VfListPanel from '@/components/VfListPanel.vue'
 
 const { t } = useI18n()
 
@@ -292,76 +293,84 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="component-manager">
-    <div class="cm-header">
-      <div class="cm-header__left">
-        <span class="vf-led vf-led--amber vf-led--pulse"></span>
-        <span>{{ $t('components.title') }}</span>
-      </div>
-      <el-button :loading="refreshing" @click="handleRefresh">
-        <el-icon><Refresh /></el-icon>{{ $t('components.refresh') }}
-      </el-button>
-    </div>
+  <div class="component-manager responsive-page">
+    <VfListPanel
+      :title="$t('components.title')"
+      led-color="amber"
+      :led-pulse="true"
+      :show-pagination="false"
+      :show-polling="false"
+      @refresh="handleRefresh"
+    >
+      <template #toolbar-right>
+        <el-button :loading="refreshing" @click="handleRefresh">
+          <el-icon><Refresh /></el-icon>{{ $t('components.refresh') }}
+        </el-button>
+      </template>
 
-    <div class="cm-grid">
-      <div v-for="comp in componentStore.components" :key="comp.type" class="cm-card">
-        <div class="cm-card__header">
-          <div class="cm-card__icon" :style="{ borderColor: statusColor(comp.status) }">
-            <el-icon :size="24" :color="statusColor(comp.status)">
-              <component :is="statusIcon(comp.status)" />
-            </el-icon>
+      <div class="cm-grid">
+        <div v-for="comp in componentStore.components" :key="comp.type" class="cm-card">
+          <div class="cm-card__header">
+            <div class="cm-card__icon" :style="{ borderColor: statusColor(comp.status) }">
+              <el-icon :size="24" :color="statusColor(comp.status)">
+                <component :is="statusIcon(comp.status)" />
+              </el-icon>
+            </div>
+            <div class="cm-card__info">
+              <div class="cm-card__name">{{ comp.name }}</div>
+              <div class="cm-card__desc">{{ comp.description }}</div>
+            </div>
           </div>
-          <div class="cm-card__info">
-            <div class="cm-card__name">{{ comp.name }}</div>
-            <div class="cm-card__desc">{{ comp.description }}</div>
+
+          <div class="cm-card__status">
+            <span class="cm-badge" :class="'cm-badge--' + comp.status">
+              <span class="cm-badge__dot" :style="{ background: statusColor(comp.status) }"></span>
+              <span>{{ $t('components.status.' + comp.status) }}</span>
+            </span>
+            <span v-if="comp.version" class="cm-version">{{ comp.version }}</span>
+          </div>
+
+          <div class="cm-card__actions">
+            <!-- Whisper ASR & yt-dlp: 仅展示检测状态，安装由用户在外部自行完成 -->
+            <template v-if="comp.type === 'whisper_asr'">
+              <el-text v-if="comp.status === 'missing' || comp.status === 'error'">{{ $t('components.whisper_not_deployed') }}</el-text>
+            </template>
+            <template v-else-if="comp.type === 'yt-dlp'">
+              <el-text v-if="comp.status === 'missing' || comp.status === 'error'">{{ $t('components.ytdlp_not_deployed') }}</el-text>
+            </template>
+            <template v-else>
+              <template v-if="comp.status === 'installing'">
+                <el-button type="primary" size="small" @click="handleShowLog(comp)">
+                  {{ $t('components.btn.progress') }}
+                </el-button>
+                <el-button type="warning" size="small" @click="handleReinstall(comp)">
+                  {{ $t('components.btn.reinstall') }}
+                </el-button>
+              </template>
+              <template v-else-if="comp.status === 'missing' || comp.status === 'error'">
+                <el-button type="primary" size="small" @click="handleInstall(comp)">
+                  {{ $t('components.btn.install') }}
+                </el-button>
+                <el-button v-if="comp.status === 'error'" type="warning" size="small" @click="handleReinstall(comp)">
+                  {{ $t('components.btn.reinstall') }}
+                </el-button>
+              </template>
+              <template v-else-if="comp.status === 'installed'">
+                <el-button type="warning" size="small" @click="handleReinstall(comp)">
+                  {{ $t('components.btn.reinstall') }}
+                </el-button>
+                <el-button type="danger" size="small" @click="handleUninstall(comp)">
+                  {{ $t('components.btn.uninstall') }}
+                </el-button>
+                <el-button size="small" @click="handleShowLog(comp)">
+                  {{ $t('components.btn.logs') }}
+                </el-button>
+              </template>
+            </template>
           </div>
         </div>
-
-        <div class="cm-card__status">
-          <span class="cm-badge" :class="'cm-badge--' + comp.status">
-            <span class="cm-badge__dot" :style="{ background: statusColor(comp.status) }"></span>
-            <span>{{ $t('components.status.' + comp.status) }}</span>
-          </span>
-          <span v-if="comp.version" class="cm-version">{{ comp.version }}</span>
-        </div>
-
-        <div class="cm-card__actions">
-          <!-- Whisper ASR: 仅展示检测状态，部署由用户在外部自行完成 -->
-          <template v-if="comp.type === 'whisper_asr'">
-            <el-text v-if="comp.status === 'missing' || comp.status === 'error'">{{ $t('components.whisper_not_deployed') }}</el-text>
-          </template>
-          <template v-else>
-            <template v-if="comp.status === 'installing'">
-              <el-button type="primary" size="small" @click="handleShowLog(comp)">
-                {{ $t('components.btn.progress') }}
-              </el-button>
-              <el-button type="warning" size="small" @click="handleReinstall(comp)">
-                {{ $t('components.btn.reinstall') }}
-              </el-button>
-            </template>
-            <template v-else-if="comp.status === 'missing' || comp.status === 'error'">
-              <el-button type="primary" size="small" @click="handleInstall(comp)">
-                {{ $t('components.btn.install') }}
-              </el-button>
-              <el-button v-if="comp.status === 'error'" type="warning" size="small" @click="handleReinstall(comp)">
-                {{ $t('components.btn.reinstall') }}
-              </el-button>
-            </template>
-            <template v-else-if="comp.status === 'installed'">
-              <el-button type="warning" size="small" @click="handleReinstall(comp)">
-                {{ $t('components.btn.reinstall') }}
-              </el-button>
-              <el-button type="danger" size="small" @click="handleUninstall(comp)">
-                {{ $t('components.btn.uninstall') }}
-              </el-button>
-              <el-button size="small" @click="handleShowLog(comp)">
-                {{ $t('components.btn.logs') }}
-              </el-button>
-            </template>
-          </template>
-        </div>
       </div>
-    </div>
+    </VfListPanel>
 
     <!-- Install Config Dialog -->
     <el-dialog
@@ -397,29 +406,22 @@ onMounted(async () => {
 
 <style scoped>
 .component-manager {
-  padding: 16px 0;
-}
-
-.cm-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 16px;
-}
-
-.cm-header__left {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-family: var(--vf-font-display);
-  font-weight: 600;
-  font-size: 14px;
+  min-height: 100%;
 }
 
 .cm-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
   gap: 16px;
+  padding: 16px;
+}
+
+@media (max-width: 767px) {
+  .cm-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+    padding: 12px;
+  }
 }
 
 .cm-card {
@@ -512,6 +514,7 @@ onMounted(async () => {
 .cm-card__actions {
   display: flex;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
 .log-terminal {

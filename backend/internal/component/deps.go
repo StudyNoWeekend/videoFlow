@@ -21,6 +21,8 @@ func TaskTypeDependencies(taskType string) []ComponentType {
 		return []ComponentType{ComponentDocker, ComponentLada}
 	case model.TaskTypeUpscale:
 		return []ComponentType{ComponentDocker, ComponentVideo2X}
+	case model.TaskTypeDownload:
+		return []ComponentType{ComponentYtDlp}
 	default:
 		return nil
 	}

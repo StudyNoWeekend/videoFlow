@@ -3,6 +3,7 @@ package model
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -29,6 +30,7 @@ const (
 	TaskTypeDeblur       = "deblur"
 	TaskTypeRepair       = "repair"
 	TaskTypeUpscale      = "upscale"
+	TaskTypeDownload     = "download"
 )
 
 // Task 字幕/去马赛克任务数据模型
@@ -83,6 +85,8 @@ type TaskListQuery struct {
 	Page     int
 	PageSize int
 	TaskType string
+	SortBy   string
+	Order    string
 }
 
 // TaskExistsPendingOrRunningByVideoAndType 检查指定视频是否存在进行中（pending/running/cancelling）的同类型任务
@@ -204,11 +208,29 @@ func TaskList(ctx context.Context, query *TaskListQuery) ([]*TaskWithVideo, int6
 
 	offset := (page - 1) * pageSize
 	var list []*TaskWithVideo
-	// 进行中的任务（running/pending/cancelling）优先，同状态内按创建时间倒序（最新在前）
-	if err := db.Order("CASE WHEN tasks.status IN ('running','pending','cancelling') THEN 0 ELSE 1 END, tasks.created_at DESC, tasks.id DESC").Offset(offset).Limit(pageSize).Scan(&list).Error; err != nil {
+	orderClause := taskOrderClause(query.SortBy, query.Order)
+	if err := db.Order(orderClause).Offset(offset).Limit(pageSize).Scan(&list).Error; err != nil {
 		return nil, 0, fmt.Errorf("查询任务列表失败: %w", err)
 	}
 	return list, total, nil
+}
+
+// taskOrderClause 根据排序字段与方向生成 ORDER BY 子句。
+// 排序字段必须来自白名单，避免 SQL 注入；未匹配时按运行中任务优先、创建时间倒序。
+func taskOrderClause(sortBy, order string) string {
+	dir := "DESC"
+	if strings.EqualFold(order, "asc") {
+		dir = "ASC"
+	}
+	switch sortBy {
+	case "created_at":
+		return "tasks.created_at " + dir + ", tasks.id DESC"
+	case "updated_at":
+		return "tasks.updated_at " + dir + ", tasks.id DESC"
+	default:
+		// 进行中的任务（running/pending/cancelling）优先，同状态内按创建时间倒序（最新在前）
+		return "CASE WHEN tasks.status IN ('running','pending','cancelling') THEN 0 ELSE 1 END, tasks.created_at DESC, tasks.id DESC"
+	}
 }
 
 // TaskUpdateStatusTx 在事务中更新任务状态、进度与进度描述。

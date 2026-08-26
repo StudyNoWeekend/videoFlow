@@ -46,6 +46,7 @@ func SetupRouter(cfg *bootstrap.AppConfigHTTP) *gin.Engine {
 		RegisterTaskRouter(api)
 		RegisterSettingRouter(api)
 		RegisterComponentRouter(api)
+		RegisterDownloadRouter(api)
 	}
 
 	// 兜底 404

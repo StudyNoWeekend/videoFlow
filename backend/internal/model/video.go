@@ -308,12 +308,14 @@ func VideoResyncAllTaskStatus(ctx context.Context) error {
 //   - 配置了 output_dir 且视频位于 video_dir 下：output_dir/<相对子目录>/<base>，
 //     镜像输入目录结构，避免不同子目录下的同名视频互相覆盖；
 //   - 配置了 output_dir 但视频不在 video_dir 下（如手动扫描其它路径）：output_dir/<base>；
-//   - 未配置 output_dir（兼容旧行为）：<视频所在目录>/<base>。
+//   - 未配置 output_dir 时使用默认输出目录 DefaultOutputDir（/output，
+//     Docker 部署映射宿主机本地输出目录的标准挂载点），同样遵循上述结构；
+//     不再回退到输入树，避免任务产物混入待扫描的视频源目录。
 func VideoOutputDir(ctx context.Context, v *Video) string {
 	base := VideoBaseName(v)
 	outputDir := SettingGet(ctx, SettingKeyOutputDir)
 	if outputDir == "" {
-		return filepath.Join(filepath.Dir(v.Path), base)
+		outputDir = DefaultOutputDir
 	}
 
 	videoDir := SettingGet(ctx, SettingKeyVideoDir)

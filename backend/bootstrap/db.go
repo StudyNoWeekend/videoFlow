@@ -83,6 +83,7 @@ func autoMigrate(ctx context.Context, db *gorm.DB) error {
 		model.Setting{},
 		model.User{},
 		model.ResetToken{},
+		model.Download{},
 	); err != nil {
 		return err
 	}
