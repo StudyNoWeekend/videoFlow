@@ -212,20 +212,18 @@ function stopPolling(): void {
 }
 
 onMounted(async () => {
-  // 加载设置（获取视频目录和输出目录路径）
-  try {
-    await settingsStore.loadSettings()
-  } catch {
-    // ignore
-  }
-  await loadDownloads()
-  if (total.value > 0) {
-    hasSubmitted.value = true
-    if (downloadingList.value.length > 0) {
-      startPolling()
-    }
-  }
-})
+	  // 加载设置（获取视频目录和输出目录路径）
+	  try {
+	    await settingsStore.loadSettings()
+	  } catch {
+	    // ignore
+	  }
+	  await loadDownloads()
+	  hasSubmitted.value = true
+	  if (total.value > 0 && downloadingList.value.length > 0) {
+	    startPolling()
+	  }
+	})
 
 onUnmounted(() => {
   stopPolling()
@@ -274,28 +272,29 @@ function handleSizeChange(size: number): void {
 
         <div class="search-box-wrapper">
           <div class="search-box">
-            <el-input
-              v-model="urlInput"
-              :placeholder="$t('downloads.placeholder')"
-              size="large"
-              clearable
-              @keydown="handleKeydown"
-            >
-              <template #prefix>
-                <el-icon><Link /></el-icon>
-              </template>
-              <template #append>
-                <el-button
-                  type="primary"
-                  :loading="searching"
-                  @click="handleSubmit"
-                  class="search-btn"
-                >
-                  <el-icon><Download /></el-icon>
-                  <span>{{ $t('downloads.download') }}</span>
-                </el-button>
-              </template>
-            </el-input>
+            <div class="search-box-form">
+              <el-input
+                v-model="urlInput"
+                :placeholder="$t('downloads.placeholder')"
+                size="large"
+                clearable
+                @keydown="handleKeydown"
+                class="search-box-input"
+              >
+                <template #prefix>
+                  <el-icon><Link /></el-icon>
+                </template>
+              </el-input>
+              <el-button
+                type="primary"
+                :loading="searching"
+                @click="handleSubmit"
+                class="search-btn"
+              >
+                <el-icon><Download /></el-icon>
+                <span>{{ $t('downloads.download') }}</span>
+              </el-button>
+            </div>
           </div>
         </div>
 
@@ -344,27 +343,29 @@ function handleSizeChange(size: number): void {
     <template v-else>
       <!-- 顶栏缩小版搜索 -->
       <div class="top-search-bar vf-panel">
-        <el-input
-          v-model="urlInput"
-          :placeholder="$t('downloads.placeholder')"
-          clearable
-          @keydown="handleKeydown"
-        >
-          <template #prefix>
-            <el-icon><Link /></el-icon>
-          </template>
-          <template #append>
-            <el-button
-              type="primary"
-              :loading="searching"
-              @click="handleSubmit"
-              round
-            >
-              <el-icon><Download /></el-icon>
-              <span class="hide-mobile">{{ $t('downloads.download') }}</span>
-            </el-button>
-          </template>
-        </el-input>
+        <div class="top-search-form">
+          <el-input
+            v-model="urlInput"
+            :placeholder="$t('downloads.placeholder')"
+            clearable
+            @keydown="handleKeydown"
+            class="top-search-input"
+          >
+            <template #prefix>
+              <el-icon><Link /></el-icon>
+            </template>
+          </el-input>
+          <el-button
+            type="primary"
+            :loading="searching"
+            @click="handleSubmit"
+            round
+            class="top-search-form-btn"
+          >
+            <el-icon><Download /></el-icon>
+            <span class="hide-mobile">{{ $t('downloads.download') }}</span>
+          </el-button>
+        </div>
         <div class="top-search-options">
           <label class="overwrite-label">
             <el-checkbox v-model="overwrite" size="small" />
@@ -712,8 +713,24 @@ function handleSizeChange(size: number): void {
   max-width: 680px;
 }
 
-.search-box :deep(.el-input__wrapper) {
-  padding: 4px 12px;
+.search-box {
+  width: 100%;
+}
+
+.search-box-form {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  position: relative;
+}
+
+.search-box-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.search-box-input :deep(.el-input__wrapper) {
+  padding: 4px 16px;
   height: 52px;
   border-radius: 26px !important;
   background: var(--vf-bg-elevated);
@@ -721,28 +738,23 @@ function handleSizeChange(size: number): void {
   transition: all 0.3s ease;
 }
 
-.search-box :deep(.el-input__wrapper):hover,
-.search-box :deep(.el-input__wrapper.is-focus) {
+.search-box-input :deep(.el-input__wrapper):hover,
+.search-box-input :deep(.el-input__wrapper.is-focus) {
   border-color: var(--vf-accent);
   box-shadow: var(--vf-glow-amber);
 }
 
-.search-box :deep(.el-input__inner) {
+.search-box-input :deep(.el-input__inner) {
   font-size: 16px;
   font-family: var(--vf-font-ui);
   height: 42px;
 }
 
-.search-box :deep(.el-input-group__append) {
-  background: transparent;
-  border: none;
-  padding-right: 4px;
-}
-
 .search-btn {
   border-radius: 22px !important;
-  padding: 0 20px !important;
-  height: 42px !important;
+  padding: 0 24px !important;
+  height: 44px !important;
+  flex-shrink: 0;
 }
 
 .overwrite-option {
@@ -835,20 +847,6 @@ function handleSizeChange(size: number): void {
   padding: 4px 10px;
 }
 
-.top-search-bar :deep(.el-input__wrapper) {
-  border-radius: 21px !important;
-  /* 修复 append 按钮可能被截断的问题 */
-  overflow: visible !important;
-}
-
-.top-search-bar :deep(.el-input-group__append) {
-  overflow: visible !important;
-}
-
-.top-search-bar :deep(.el-input-group) {
-  overflow: visible !important;
-}
-
 .top-search-options {
   display: flex;
   align-items: center;
@@ -904,15 +902,40 @@ function handleSizeChange(size: number): void {
   }
 }
 
-.top-search-bar :deep(.el-input__wrapper) {
-  padding: 2px 8px;
+.top-search-form {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  position: relative;
+}
+
+.top-search-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.top-search-input :deep(.el-input__wrapper) {
+  padding: 2px 12px;
   height: 42px;
   border-radius: 21px !important;
 }
 
-.top-search-bar :deep(.el-input__inner) {
+.top-search-input :deep(.el-input__inner) {
   font-size: 14px;
   font-family: var(--vf-font-ui);
+}
+
+.top-search-form-btn {
+  flex-shrink: 0;
+  height: 42px;
+  border-radius: 21px !important;
+  padding: 0 20px !important;
+}
+
+@media (max-width: 480px) {
+  .top-search-form-btn {
+    padding: 0 14px !important;
+  }
 }
 
 .section-title {

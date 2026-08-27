@@ -325,7 +325,7 @@ func (l *DownloadLogic) probeVideoInfo(ctx context.Context, url string) (title s
 	titleCmd := exec.CommandContext(ctx, "yt-dlp", "--print", "title", url)
 	titleCmd.Env = os.Environ()
 	titleCmd.Env = append(titleCmd.Env, "PYTHONUNBUFFERED=1")
-	titleOut, titleErr := titleCmd.CombinedOutput()
+	titleOut, titleErr := titleCmd.Output()
 	if titleErr != nil {
 		return "", 0, fmt.Errorf("获取视频标题失败: %w\noutput: %s", titleErr, string(titleOut))
 	}
@@ -338,7 +338,7 @@ func (l *DownloadLogic) probeVideoInfo(ctx context.Context, url string) (title s
 	durationCmd := exec.CommandContext(ctx, "yt-dlp", "--print", "duration_string", url)
 	durationCmd.Env = os.Environ()
 	durationCmd.Env = append(durationCmd.Env, "PYTHONUNBUFFERED=1")
-	durOut, durErr := durationCmd.CombinedOutput()
+	durOut, durErr := durationCmd.Output()
 	if durErr == nil {
 		durationStr := strings.TrimSpace(string(durOut))
 		duration = parseDurationStr(durationStr)
@@ -543,6 +543,15 @@ func (l *DownloadLogic) executeDownload(ctx context.Context, downloadID, url, ou
 			return "", 0, fmt.Errorf("yt-dlp 执行失败: %w\n%s", err, stderrStr)
 		}
 		return "", 0, fmt.Errorf("yt-dlp 执行失败: %w", err)
+	}
+
+	// 检查 yt-dlp 是否产生了输出文件（exit 0 但无文件 = extractor 未匹配）
+	if dlPath == "" {
+		stderrStr := strings.TrimSpace(stderrBuf.String())
+		if stderrStr != "" {
+			return "", 0, fmt.Errorf("yt-dlp 未生成文件: %s", stderrStr)
+		}
+		return "", 0, fmt.Errorf("yt-dlp 未生成文件，链接可能不受支持")
 	}
 
 	downloadedPath = dlPath
