@@ -17,7 +17,7 @@ type DownloadController struct {
 // NewDownloadController 创建下载管理控制器
 func NewDownloadController() *DownloadController {
 	return &DownloadController{
-		downloadLogic: logic.NewDownloadLogic(),
+		downloadLogic: logic.GetGlobalDownloadLogic(),
 	}
 }
 

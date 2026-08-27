@@ -141,7 +141,10 @@ func main() {
 	// 1. 先停止调度器，让 worker 不再认领新任务，但已 running 的任务继续执行
 	taskScheduler.Stop()
 
-	// 2. 所有 worker 已完成（或 context 已 cancel），再将 running 任务标记为失败
+	// 2. 停止所有下载任务（复用取消路径：杀进程 → 清缓存 → 改状态）
+	logic.GetGlobalDownloadLogic().StopAll()
+
+	// 3. 所有 worker 已完成（或 context 已 cancel），再将 running 任务标记为失败
 	//    （先停调度器再标失败，避免 worker 落定终态覆盖"程序重启"标记）
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()

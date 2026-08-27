@@ -30,13 +30,29 @@ type DownloadLogic struct {
 	// cancelMu 保护 runningCancels：进行中下载任务的取消函数
 	cancelMu       sync.Mutex
 	runningCancels map[string]context.CancelFunc
+
+	// pathMu 保护 runningPaths：进行中下载任务的目标文件路径
+	pathMu       sync.Mutex
+	runningPaths map[string]string
 }
 
 // NewDownloadLogic 创建下载任务 logic 实例
 func NewDownloadLogic() *DownloadLogic {
 	return &DownloadLogic{
 		runningCancels: make(map[string]context.CancelFunc),
+		runningPaths:   make(map[string]string),
 	}
+}
+
+var (
+	globalDL     *DownloadLogic
+	globalDLOnce sync.Once
+)
+
+// GetGlobalDownloadLogic 返回全局唯一的 DownloadLogic 实例
+func GetGlobalDownloadLogic() *DownloadLogic {
+	globalDLOnce.Do(func() { globalDL = NewDownloadLogic() })
+	return globalDL
 }
 
 // CreateDownload 创建下载任务，校验 URL 与依赖组件后启动后台下载
@@ -131,9 +147,14 @@ func (l *DownloadLogic) CancelDownload(ctx context.Context, id string) (*res.Dow
 		return nil, enum.ErrTaskNotCancelable
 	}
 
-	// 触发取消
+	// 触发取消（杀死 yt-dlp 进程）
 	if cancel := l.getCancel(id); cancel != nil {
 		cancel()
+	}
+
+	// 清理 yt-dlp 遗留的 .part / .ytdl 缓存文件
+	if path := l.unregisterPath(id); path != "" {
+		l.cleanupDownloadCache(path)
 	}
 
 	if err := model.DownloadMarkCancelled(ctx, id); err != nil {
@@ -201,6 +222,7 @@ func (l *DownloadLogic) DeleteDownload(ctx context.Context, id string, deleteFil
 // runDownload 后台执行下载任务（在独立 goroutine 中运行）
 func (l *DownloadLogic) runDownload(ctx context.Context, dl *model.Download) {
 	defer l.unregisterCancel(dl.ID)
+	defer l.unregisterPath(dl.ID)
 
 	logger.Logger.Info("开始执行下载任务",
 		zap.String("download_id", dl.ID),
@@ -271,6 +293,12 @@ func (l *DownloadLogic) runDownload(ctx context.Context, dl *model.Download) {
 			)
 		}
 	}
+
+	// 用预测路径预注册到 runningPaths（executeDownload 会从 Destination 行更新为实际路径）
+	titleSafe := sanitizeFilename(title)
+	predictedPath := strings.ReplaceAll(outputTemplate, "%(title)s", titleSafe)
+	predictedPath = strings.ReplaceAll(predictedPath, "%(ext)s", "mp4")
+	l.registerPath(dl.ID, predictedPath)
 
 	downloadedPath, fileSize, err := l.executeDownload(ctx, dl.ID, dl.URL, outputTemplate, dl.Overwrite)
 	if err != nil {
@@ -472,7 +500,12 @@ func (l *DownloadLogic) executeDownload(ctx context.Context, downloadID, url, ou
 		}
 
 		// 检测文件路径相关的输出行
-		dlPath = parseDownloadPath(line, dlPath)
+		newPath := parseDownloadPath(line, dlPath)
+		if newPath != dlPath {
+			dlPath = newPath
+			// 将实时路径同步到 runningPaths，以便取消时能精确清理缓存
+			l.registerPath(downloadID, dlPath)
+		}
 
 		// 匹配进度、总大小、速度
 		if matches := ytDlpProgressRegex.FindStringSubmatch(line); len(matches) >= 6 {
@@ -607,6 +640,58 @@ func (l *DownloadLogic) updateProgress(ctx context.Context, id string, status st
 	}
 }
 
+// StopAll 取消所有运行中的下载任务，清理缓存文件并标记数据库。
+// 复用与 CancelDownload 相同的取消路径：杀进程 → 清缓存 → 改状态。
+func (l *DownloadLogic) StopAll() {
+	logger.Logger.Info("正在取消所有下载任务...")
+
+	// 1. 备份 IDs，避免遍历时持有锁
+	l.cancelMu.Lock()
+	ids := make([]string, 0, len(l.runningCancels))
+	for id := range l.runningCancels {
+		ids = append(ids, id)
+	}
+	l.cancelMu.Unlock()
+
+	if len(ids) == 0 {
+		logger.Logger.Info("没有正在进行的下载任务")
+	} else {
+		logger.Logger.Info("正在取消下载任务", zap.Int("count", len(ids)))
+	}
+
+	// 2. 逐一取消（复用取消路径）
+	for _, id := range ids {
+		if cancel := l.getCancel(id); cancel != nil {
+			cancel()
+		}
+		// 清理缓存
+		if path := l.unregisterPath(id); path != "" {
+			l.cleanupDownloadCache(path)
+		}
+	}
+
+	// 3. 批量标记 DB 中所有运行中/待处理的下载为 cancelled
+	// （goroutine 的 DownloadMarkCancelled 可能来不及执行，这里兜底）
+	err := model.DB.WithContext(context.Background()).Model(&model.Download{}).
+		Where("status IN ?", []string{
+			model.DownloadStatusPending,
+			model.DownloadStatusProbing,
+			model.DownloadStatusDownloading,
+		}).
+		Updates(map[string]interface{}{
+			"status":       model.DownloadStatusCancelled,
+			"progress":     0,
+			"progress_msg": "程序关闭，下载已取消",
+			"error_msg":    "程序关闭，下载已取消",
+			"updated_at":   time.Now().Unix(),
+		}).Error
+	if err != nil {
+		logger.Logger.Warn("批量标记下载任务为取消状态失败", zap.Error(err))
+	} else {
+		logger.Logger.Info("已标记所有未完成下载为取消状态")
+	}
+}
+
 // registerCancel 注册下载任务的取消函数
 func (l *DownloadLogic) registerCancel(id string, cancel context.CancelFunc) {
 	l.cancelMu.Lock()
@@ -626,6 +711,44 @@ func (l *DownloadLogic) getCancel(id string) context.CancelFunc {
 	l.cancelMu.Lock()
 	defer l.cancelMu.Unlock()
 	return l.runningCancels[id]
+}
+
+// cleanupDownloadCache 清理 yt-dlp 下载时留下的 .part 和 .ytdl 缓存文件
+func (l *DownloadLogic) cleanupDownloadCache(downloadPath string) {
+	for _, suffix := range []string{".part", ".ytdl"} {
+		cachePath := downloadPath + suffix
+		if err := os.Remove(cachePath); err != nil && !os.IsNotExist(err) {
+			logger.Logger.Warn("清理下载缓存文件失败",
+				zap.String("path", cachePath),
+				zap.Error(err),
+			)
+		} else if err == nil {
+			logger.Logger.Info("已清理下载缓存文件", zap.String("path", cachePath))
+		}
+	}
+}
+
+// registerPath 注册下载任务的目标文件路径
+func (l *DownloadLogic) registerPath(id, path string) {
+	l.pathMu.Lock()
+	defer l.pathMu.Unlock()
+	l.runningPaths[id] = path
+}
+
+// getPath 获取下载任务的目标文件路径
+func (l *DownloadLogic) getPath(id string) string {
+	l.pathMu.Lock()
+	defer l.pathMu.Unlock()
+	return l.runningPaths[id]
+}
+
+// unregisterPath 移除下载任务的目标文件路径
+func (l *DownloadLogic) unregisterPath(id string) string {
+	l.pathMu.Lock()
+	defer l.pathMu.Unlock()
+	path := l.runningPaths[id]
+	delete(l.runningPaths, id)
+	return path
 }
 
 // downloadToRes 将 Download 模型转换为响应结构
