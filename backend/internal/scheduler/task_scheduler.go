@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -930,11 +931,11 @@ func (s *TaskScheduler) processRepairTask(ctx context.Context, task *model.Task,
 	linkedPath := sourcePath
 	if filepath.Dir(sourcePath) != outputDir {
 		linkedPath = filepath.Join(outputDir, filepath.Base(video.Path))
-		if err := os.Link(sourcePath, linkedPath); err != nil {
-			s.markFailed(ctx, task, fmt.Errorf("创建视频硬链接失败: %w", err))
+		if err := linkOrCopy(sourcePath, linkedPath); err != nil {
+			s.markFailed(ctx, task, fmt.Errorf("创建视频工作副本失败: %w", err))
 			return
 		}
-		// 无论去马赛克成功或失败，最后都清理硬链接
+		// 无论去马赛克成功或失败，最后都清理工作副本
 		defer os.Remove(linkedPath)
 	}
 	// 去马赛克输出文件名由外部程序生成，记录执行前快照供取消时清理新增文件
@@ -1057,11 +1058,11 @@ func (s *TaskScheduler) processUpscaleTask(ctx context.Context, task *model.Task
 	execPath := sourcePath
 	if filepath.Dir(sourcePath) != outputDir {
 		execPath = filepath.Join(outputDir, filepath.Base(sourcePath))
-		if err := os.Link(sourcePath, execPath); err != nil {
-			s.markFailed(ctx, task, fmt.Errorf("创建视频硬链接失败: %w", err))
+		if err := linkOrCopy(sourcePath, execPath); err != nil {
+			s.markFailed(ctx, task, fmt.Errorf("创建视频工作副本失败: %w", err))
 			return
 		}
-		// 无论清晰度修复成功或失败，最后都清理硬链接
+		// 无论清晰度修复成功或失败，最后都清理工作副本
 		defer os.Remove(execPath)
 	}
 	out.recordProduced(filepath.Join(outputDir, upscale.OutputFileName(execPath, targetHeight)))
@@ -1129,6 +1130,56 @@ func (s *TaskScheduler) processUpscaleTask(ctx context.Context, task *model.Task
 		zap.String("task_id", task.ID),
 		zap.String("video_path", video.Path),
 	)
+}
+
+// linkOrCopy 优先尝试硬链接，跨设备时回退到文件拷贝。
+// Docker 部署中 /videos 和 /output 可能挂载自不同设备，os.Link 跨设备会返回
+// invalid cross-device link 错误，此时改用文件拷贝确保源文件进入输出目录。
+func linkOrCopy(src, dst string) error {
+	err := os.Link(src, dst)
+	if err == nil {
+		return nil
+	}
+	// 非跨设备错误直接返回
+	if !isCrossDeviceLinkError(err) {
+		return err
+	}
+	return copyFile(src, dst)
+}
+
+// isCrossDeviceLinkError 判断硬链接错误是否因跨设备引起
+func isCrossDeviceLinkError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	// Linux: "invalid cross-device link" (EXDEV)
+	// macOS: "invalid cross-device link" 或 "Operation not permitted"
+	return strings.Contains(errStr, "cross-device") || strings.Contains(errStr, "cross device")
+}
+
+// copyFile 将 src 文件内容完整拷贝到 dst，不保留硬链接关系。
+// 用于跨设备场景下替代 os.Link。
+func copyFile(src, dst string) error {
+	srcFile, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer srcFile.Close()
+
+	dstFile, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer dstFile.Close()
+
+	_, err = io.Copy(dstFile, srcFile)
+	if err != nil {
+		// 拷贝失败时清理残留的目标文件
+		os.Remove(dst)
+		return err
+	}
+	return nil
 }
 
 // updateProgress 在事务中更新任务进度
