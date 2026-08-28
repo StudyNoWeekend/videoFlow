@@ -92,8 +92,12 @@ func (l *TaskLogic) CreateTask(ctx context.Context, createReq *req.TaskCreateReq
 // 为空或等于关联视频本身时视为使用原视频；否则必须为存在且位于该视频
 // 同名输出目录内的视频文件（即由该视频生成的衍生视频，如字幕合成视频）。
 func (l *TaskLogic) validateSourcePath(ctx context.Context, video *model.Video, sourcePath string) (string, error) {
+	// 先检查空串，避免 filepath.Clean("") 返回 "." 绕过后续判断
+	if sourcePath == "" {
+		return "", nil
+	}
 	cleaned := filepath.Clean(sourcePath)
-	if cleaned == "" || cleaned == filepath.Clean(video.Path) {
+	if cleaned == filepath.Clean(video.Path) {
 		return "", nil
 	}
 
@@ -272,9 +276,12 @@ func (l *TaskLogic) DeleteTask(ctx context.Context, taskID string, deleteFiles b
 		if err := model.TaskDeleteTx(tx, taskID); err != nil {
 			return err
 		}
-		// 删除任务后重新对齐该类型状态字段（最新任务回退为旧任务，或清空为未开始）
-		if err := model.VideoResyncTaskStatusTx(tx, task.VideoID, task.TaskType); err != nil {
-			return err
+		// 仅当同时删除产物文件时才重置该类型状态字段：保留产物（deleteFiles=false）
+		// 时视为任务产物仍在，状态保持不变，避免"产物还在但已完成状态消失"。
+		if deleteFiles {
+			if err := model.VideoResyncTaskStatusTx(tx, task.VideoID, task.TaskType); err != nil {
+				return err
+			}
 		}
 		delTask = task
 		return nil
@@ -323,8 +330,11 @@ func (l *TaskLogic) BatchDelete(ctx context.Context, deleteReq *req.TaskBatchDel
 			if err := model.TaskDeleteTx(tx, id); err != nil {
 				return err
 			}
-			if err := model.VideoResyncTaskStatusTx(tx, task.VideoID, task.TaskType); err != nil {
-				return err
+			// 仅当批量删除同时删除产物文件时才重置该类型状态字段
+			if deleteReq.DeleteFiles {
+				if err := model.VideoResyncTaskStatusTx(tx, task.VideoID, task.TaskType); err != nil {
+					return err
+				}
 			}
 			delTask = task
 			return nil
