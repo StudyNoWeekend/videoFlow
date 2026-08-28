@@ -212,18 +212,21 @@ function stopPolling(): void {
 }
 
 onMounted(async () => {
-	  // 加载设置（获取视频目录和输出目录路径）
-	  try {
-	    await settingsStore.loadSettings()
-	  } catch {
-	    // ignore
-	  }
-	  await loadDownloads()
-	  hasSubmitted.value = true
-	  if (total.value > 0 && downloadingList.value.length > 0) {
-	    startPolling()
-	  }
-	})
+		  // 加载设置（获取视频目录和输出目录路径）
+		  try {
+		    await settingsStore.loadSettings()
+		  } catch {
+		    // ignore
+		  }
+		  await loadDownloads()
+		  // 只在有下载记录时切换到已提交视图，否则展示初始搜索页
+		  if (total.value > 0) {
+		    hasSubmitted.value = true
+		  }
+		  if (total.value > 0 && downloadingList.value.length > 0) {
+		    startPolling()
+		  }
+		})
 
 onUnmounted(() => {
   stopPolling()
