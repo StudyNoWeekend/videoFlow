@@ -10,6 +10,8 @@ import (
 	"syscall"
 	"time"
 
+	"go.uber.org/zap"
+
 	"video-captions/bootstrap"
 	"video-captions/internal/logic"
 	"video-captions/internal/model"
@@ -30,6 +32,7 @@ func main() {
 		log.Fatalf("初始化日志失败: %v", err)
 	}
 	defer logger.Sync()
+	defer logger.Close()
 
 	// 初始化 SQLite 数据库
 	_, err = bootstrap.InitDB(&cfg.Database)
@@ -72,7 +75,7 @@ func main() {
 
 	// 若数据库中已持久化去马赛克配置，则覆盖配置文件默认值（出错不阻断启动）
 	if err := logic.NewSettingLogic().ApplyRepairFromSettings(context.Background()); err != nil {
-		log.Printf("加载已保存的去马赛克配置失败（将使用默认配置）: %v", err)
+		logger.Logger.Warn("加载已保存的去马赛克配置失败，将使用默认配置", zap.Error(err))
 	}
 
 	// 初始化清晰度去马赛克执行器
@@ -82,7 +85,7 @@ func main() {
 
 	// 若数据库中已持久化清晰度去马赛克配置，则覆盖配置文件默认值（出错不阻断启动）
 	if err := logic.NewSettingLogic().ApplyUpscaleFromSettings(context.Background()); err != nil {
-		log.Printf("加载已保存的清晰度去马赛克配置失败（将使用默认配置）: %v", err)
+		logger.Logger.Warn("加载已保存的清晰度去马赛克配置失败，将使用默认配置", zap.Error(err))
 	}
 
 	// 启动任务调度器
@@ -92,14 +95,14 @@ func main() {
 
 	// 兜底清理：将上次非正常退出（容器被强杀、断电等）残留的 running 任务标记为失败
 	if affected, err := model.TaskMarkRunningAsFailed(context.Background(), "服务异常终止"); err != nil {
-		log.Printf("清理残留运行中任务失败: %v", err)
+		logger.Logger.Error("清理残留运行中任务失败", zap.Error(err))
 	} else if affected > 0 {
-		log.Printf("已将 %d 个残留运行中任务标记为失败（原因：上次服务异常终止）", affected)
+		logger.Logger.Info("已将残留运行中任务标记为失败（原因：上次服务异常终止）", zap.Int64("count", affected))
 	}
 
 	// 回填视频各任务类型状态字段（与最新任务记录对齐，兼容升级前的历史数据）
 	if err := model.VideoResyncAllTaskStatus(context.Background()); err != nil {
-		log.Printf("回填视频任务状态失败: %v", err)
+		logger.Logger.Error("回填视频任务状态失败", zap.Error(err))
 	}
 
 	if err := taskScheduler.Start(context.Background()); err != nil {
@@ -125,7 +128,7 @@ func main() {
 
 	// 启动 HTTP 服务
 	go func() {
-		log.Printf("HTTP 服务启动，监听地址: %s", addr)
+		logger.Logger.Info("HTTP 服务启动", zap.String("addr", addr))
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("HTTP 服务启动失败: %v", err)
 		}
@@ -136,7 +139,7 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	log.Println("正在关闭服务...")
+	logger.Logger.Info("正在关闭服务...")
 
 	// 1. 先停止调度器，让 worker 不再认领新任务，但已 running 的任务继续执行
 	taskScheduler.Stop()
@@ -150,19 +153,19 @@ func main() {
 	defer shutdownCancel()
 
 	if affected, err := model.TaskMarkRunningAsFailed(shutdownCtx, "程序重启"); err != nil {
-		log.Printf("标记运行中任务为失败时出错: %v", err)
+		logger.Logger.Error("标记运行中任务为失败时出错", zap.Error(err))
 	} else if affected > 0 {
-		log.Printf("已将 %d 个运行中任务标记为失败（原因：程序重启）", affected)
+		logger.Logger.Info("已将运行中任务标记为失败（原因：程序重启）", zap.Int64("count", affected))
 	}
 
 	// 3. 标记完任务后再全量回填视频状态字段（确保重启后视频徽标准确）
 	if err := model.VideoResyncAllTaskStatus(shutdownCtx); err != nil {
-		log.Printf("回填视频任务状态失败: %v", err)
+		logger.Logger.Error("回填视频任务状态失败", zap.Error(err))
 	}
 
 	// 4. 关闭 HTTP 服务
 	if err := srv.Shutdown(shutdownCtx); err != nil {
-		log.Printf("HTTP 服务关闭异常: %v", err)
+		logger.Logger.Error("HTTP 服务关闭异常", zap.Error(err))
 	}
 
 	// 5. 停止视频目录扫描器
@@ -175,5 +178,5 @@ func main() {
 		}
 	}
 
-	log.Println("服务已退出")
+	logger.Logger.Info("服务已退出")
 }

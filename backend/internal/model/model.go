@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"fmt"
 
 	"gorm.io/gorm"
 )
@@ -17,27 +18,10 @@ type BaseModel struct {
 	DeletedAt gorm.DeletedAt `gorm:"index;comment:软删除时间" json:"-"`
 }
 
-// Paginate 通用分页封装
-func Paginate(page, pageSize int) func(db *gorm.DB) *gorm.DB {
-	return func(db *gorm.DB) *gorm.DB {
-		if page < 1 {
-			page = 1
-		}
-		if pageSize < 1 {
-			pageSize = 20
-		}
-		if pageSize > 100 {
-			pageSize = 100
-		}
-		offset := (page - 1) * pageSize
-		return db.Offset(offset).Limit(pageSize)
-	}
-}
-
 // CheckDBHealth 检查数据库连接健康状态
 func CheckDBHealth(ctx context.Context) error {
 	if DB == nil {
-		return nil
+		return fmt.Errorf("数据库未初始化")
 	}
 	sqlDB, err := DB.DB()
 	if err != nil {

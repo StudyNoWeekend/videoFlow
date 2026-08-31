@@ -223,7 +223,9 @@ func VideoUpdate(ctx context.Context, id string, name string) (*Video, error) {
 	return video, nil
 }
 
-// VideoDelete 根据 ID 删除视频记录（软删除）
+// VideoDelete 根据 ID 删除视频记录（软删除）。
+// videos.path 上有唯一索引，软删除行仍占据索引位，会阻止同一文件重新扫描入库；
+// 因此删除成功后同步改写 path 释放占位（幂等：仅 RowsAffected>0 的那次删除会执行）。
 func VideoDelete(ctx context.Context, id string) error {
 	result := DB.WithContext(ctx).Delete(&Video{}, "id = ?", id)
 	if result.Error != nil {
@@ -231,6 +233,11 @@ func VideoDelete(ctx context.Context, id string) error {
 	}
 	if result.RowsAffected == 0 {
 		return gorm.ErrRecordNotFound
+	}
+	if err := DB.WithContext(ctx).Unscoped().Model(&Video{}).
+		Where("id = ?", id).
+		Update("path", gorm.Expr("path || ':deleted:' || id")).Error; err != nil {
+		return fmt.Errorf("释放视频路径唯一索引占位失败: %w", err)
 	}
 	return nil
 }

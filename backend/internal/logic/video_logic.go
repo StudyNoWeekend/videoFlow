@@ -2,7 +2,6 @@ package logic
 
 import (
 	"context"
-	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -39,7 +38,8 @@ func (l *VideoLogic) ScanConfiguredDir(ctx context.Context) (*res.VideoScanRes, 
 		if os.IsNotExist(err) {
 			return nil, enum.ErrInvalidParam.WithMsg("视频目录不存在")
 		}
-		return nil, enum.ErrInternalServer.WithMsg(fmt.Sprintf("读取视频目录失败: %v", err))
+		logger.WithTraceID(ctx).Error("读取视频目录失败", zap.Error(err))
+		return nil, enum.ErrInternalServer
 	}
 	if !info.IsDir() {
 		return nil, enum.ErrInvalidParam.WithMsg("视频目录不是目录")
@@ -52,8 +52,12 @@ func (l *VideoLogic) ScanConfiguredDir(ctx context.Context) (*res.VideoScanRes, 
 // 按文件路径去重，已存在记录时更新元信息
 func (l *VideoLogic) ScanDir(ctx context.Context, scanReq *req.VideoScanReq) (*res.VideoScanRes, error) {
 	path := scanReq.Path
+	// 未指定路径时回退到配置的视频目录
 	if path == "" {
-		return nil, enum.ErrInvalidParam
+		path = model.SettingGet(ctx, model.SettingKeyVideoDir)
+	}
+	if path == "" {
+		return nil, enum.ErrInvalidParam.WithMsg("扫描路径为空，且未配置视频目录")
 	}
 
 	// 验证目录存在且可读
@@ -62,7 +66,8 @@ func (l *VideoLogic) ScanDir(ctx context.Context, scanReq *req.VideoScanReq) (*r
 		if os.IsNotExist(err) {
 			return nil, enum.ErrInvalidParam.WithMsg("扫描目录不存在")
 		}
-		return nil, enum.ErrInternalServer.WithMsg(fmt.Sprintf("读取目录失败: %v", err))
+		logger.WithTraceID(ctx).Error("读取目录失败", zap.Error(err))
+		return nil, enum.ErrInternalServer
 	}
 	if !info.IsDir() {
 		return nil, enum.ErrInvalidParam.WithMsg("扫描路径不是目录")
@@ -100,7 +105,8 @@ func (l *VideoLogic) ScanDir(ctx context.Context, scanReq *req.VideoScanReq) (*r
 		return nil
 	})
 	if err != nil {
-		return nil, enum.ErrDatabase.WithMsg(fmt.Sprintf("扫描保存视频失败: %v", err))
+		logger.WithTraceID(ctx).Error("扫描保存视频失败", zap.Error(err))
+		return nil, enum.ErrDatabase
 	}
 
 	return &res.VideoScanRes{Scanned: scanned}, nil
@@ -115,7 +121,8 @@ func (l *VideoLogic) List(ctx context.Context, listReq *req.VideoListReq) (*res.
 		Order:    listReq.Order,
 	})
 	if err != nil {
-		return nil, enum.ErrDatabase.WithMsg(fmt.Sprintf("查询视频列表失败: %v", err))
+		logger.WithTraceID(ctx).Error("查询视频列表失败", zap.Error(err))
+		return nil, enum.ErrDatabase
 	}
 
 	list := make([]*res.VideoRes, 0, len(videos))
@@ -156,7 +163,8 @@ func (l *VideoLogic) Update(ctx context.Context, id string, updateReq *req.Video
 
 	video, err := model.VideoUpdate(ctx, id, updateReq.Name)
 	if err != nil {
-		return nil, enum.ErrDatabase.WithMsg(fmt.Sprintf("更新视频失败: %v", err))
+		logger.WithTraceID(ctx).Error("更新视频失败", zap.Error(err))
+		return nil, enum.ErrDatabase
 	}
 	if video == nil {
 		return nil, enum.ErrNotFound
@@ -175,7 +183,8 @@ func (l *VideoLogic) Delete(ctx context.Context, id string) error {
 		if err == gorm.ErrRecordNotFound {
 			return enum.ErrNotFound
 		}
-		return enum.ErrDatabase.WithMsg(fmt.Sprintf("删除视频失败: %v", err))
+		logger.WithTraceID(ctx).Error("删除视频失败", zap.Error(err))
+		return enum.ErrDatabase
 	}
 	return nil
 }
@@ -193,7 +202,8 @@ func (l *VideoLogic) BatchDelete(ctx context.Context, deleteReq *req.VideoBatchD
 
 		video, err := model.VideoGetByID(ctx, id)
 		if err != nil {
-			return nil, enum.ErrDatabase.WithMsg(fmt.Sprintf("查询视频失败: %v", err))
+			logger.WithTraceID(ctx).Error("查询视频失败", zap.Error(err))
+			return nil, enum.ErrDatabase
 		}
 		if video == nil {
 			result.Skipped++
@@ -203,7 +213,7 @@ func (l *VideoLogic) BatchDelete(ctx context.Context, deleteReq *req.VideoBatchD
 		if deleteReq.DeleteFiles {
 			outputDir := model.VideoOutputDir(ctx, video)
 			if err := os.RemoveAll(outputDir); err != nil {
-				logger.Logger.Warn("删除视频输出目录失败",
+				logger.WithTraceID(ctx).Warn("删除视频输出目录失败",
 					zap.String("path", outputDir),
 					zap.Error(err),
 				)
@@ -215,15 +225,19 @@ func (l *VideoLogic) BatchDelete(ctx context.Context, deleteReq *req.VideoBatchD
 				result.Skipped++
 				continue
 			}
-			return nil, enum.ErrDatabase.WithMsg(fmt.Sprintf("删除视频失败: %v", err))
+			logger.WithTraceID(ctx).Error("删除视频失败", zap.Error(err))
+			return nil, enum.ErrDatabase
 		}
 		result.Deleted++
 	}
 	return result, nil
 }
 
-// videoModelToRes 将视频模型转换为响应结构
+// videoModelToRes 将视频模型转换为响应结构，视频记录不存在（nil）时返回 nil
 func videoModelToRes(v *model.Video) *res.VideoRes {
+	if v == nil {
+		return nil
+	}
 	return &res.VideoRes{
 		ID:        v.ID,
 		Path:      v.Path,
@@ -241,7 +255,7 @@ func videoModelToRes(v *model.Video) *res.VideoRes {
 func getVideoDuration(ctx context.Context, path string) int64 {
 	duration, err := ffmpeg.GetDuration(ctx, path)
 	if err != nil {
-		logger.Logger.Warn("获取视频时长失败",
+		logger.WithTraceID(ctx).Warn("获取视频时长失败",
 			zap.String("path", path),
 			zap.Error(err),
 		)
@@ -254,7 +268,7 @@ func getVideoDuration(ctx context.Context, path string) int64 {
 func getVideoResolution(ctx context.Context, path string) (int, int) {
 	w, h, err := ffmpeg.GetResolution(ctx, path)
 	if err != nil {
-		logger.Logger.Warn("获取视频分辨率失败",
+		logger.WithTraceID(ctx).Warn("获取视频分辨率失败",
 			zap.String("path", path),
 			zap.Error(err),
 		)
@@ -353,7 +367,8 @@ type DirFileInfo struct {
 func (l *VideoLogic) DirFiles(ctx context.Context, videoID string) ([]*DirFileInfo, error) {
 	video, err := model.VideoGetByID(ctx, videoID)
 	if err != nil {
-		return nil, enum.ErrDatabase.WithMsg(fmt.Sprintf("获取视频失败: %v", err))
+		logger.WithTraceID(ctx).Error("获取视频失败", zap.Error(err))
+		return nil, enum.ErrDatabase
 	}
 	if video == nil {
 		return nil, enum.ErrNotFound
@@ -377,7 +392,7 @@ func (l *VideoLogic) DirFiles(ctx context.Context, videoID string) ([]*DirFileIn
 	entries, err := os.ReadDir(outputDir)
 	if err != nil {
 		// 输出目录不存在也没关系，至少返回原视频
-		logger.Logger.Warn("读取输出目录失败", zap.String("dir", outputDir), zap.Error(err))
+		logger.WithTraceID(ctx).Warn("读取输出目录失败", zap.String("dir", outputDir), zap.Error(err))
 		return files, nil
 	}
 

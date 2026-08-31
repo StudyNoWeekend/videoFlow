@@ -15,6 +15,9 @@ import (
 // Logger 全局 zap 日志实例
 var Logger *zap.Logger
 
+// fileWriter 保存文件写入器引用，供进程退出时关闭
+var fileWriter *weeklyWriter
+
 // InitLogger 初始化 zap 日志。
 // level: debug / info / warn / error
 // path: 日志输出目录，为空时仅输出到 stdout；非空时同时输出到该目录下按周轮转的文件
@@ -37,6 +40,7 @@ func InitLogger(level, path string) error {
 	// 当配置了日志目录时，同时输出到文件
 	if path != "" {
 		fw := newWeeklyWriter(path, "app")
+		fileWriter = fw
 		ws = zapcore.NewMultiWriteSyncer(ws, fw)
 	}
 
@@ -55,6 +59,13 @@ func InitLogger(level, path string) error {
 func Sync() {
 	if Logger != nil {
 		_ = Logger.Sync()
+	}
+}
+
+// Close 关闭日志文件写入器并停止后台清理 goroutine
+func Close() {
+	if fileWriter != nil {
+		_ = fileWriter.Close()
 	}
 }
 

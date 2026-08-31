@@ -34,6 +34,9 @@ type DownloadLogic struct {
 	// pathMu 保护 runningPaths：进行中下载任务的目标文件路径
 	pathMu       sync.Mutex
 	runningPaths map[string]string
+
+	// wg 跟踪运行中的下载 goroutine，保证优雅关闭时等待其落定终态
+	wg sync.WaitGroup
 }
 
 // NewDownloadLogic 创建下载任务 logic 实例
@@ -60,6 +63,10 @@ func (l *DownloadLogic) CreateDownload(ctx context.Context, createReq *req.Downl
 	if createReq.URL == "" {
 		return nil, enum.ErrInvalidParam.WithMsg("视频链接不能为空")
 	}
+	// 仅允许 http/https 链接，防止以 -- 开头的输入被 yt-dlp 解析为命令行选项（参数注入）
+	if !isValidDownloadURL(createReq.URL) {
+		return nil, enum.ErrInvalidParam.WithMsg("视频链接必须以 http:// 或 https:// 开头")
+	}
 
 	// 校验 yt-dlp 组件是否就绪
 	if missing := component.CheckTaskDependencies(ctx, model.TaskTypeDownload); len(missing) > 0 {
@@ -73,24 +80,26 @@ func (l *DownloadLogic) CreateDownload(ctx context.Context, createReq *req.Downl
 		DownloadDir: createReq.DownloadDir,
 	}
 	if err := model.DownloadCreate(ctx, download); err != nil {
-		return nil, enum.ErrDatabase.WithMsg(fmt.Sprintf("创建下载任务失败: %v", err))
+		logger.WithTraceID(ctx).Error("创建下载任务失败", zap.Error(err))
+		return nil, enum.ErrDatabase
 	}
 
 	// 启动后台 goroutine 执行下载
 	dlCtx, dlCancel := context.WithCancel(context.Background())
 	l.registerCancel(download.ID, dlCancel)
+	l.wg.Add(1)
 	go l.runDownload(dlCtx, download)
 
 	return downloadToRes(download), nil
 }
 
+// isValidDownloadURL 校验下载链接必须为 http/https 协议，防止参数注入
+func isValidDownloadURL(u string) bool {
+	return strings.HasPrefix(u, "http://") || strings.HasPrefix(u, "https://")
+}
+
 // ListDownloads 分页查询下载任务列表
-func (l *DownloadLogic) ListDownloads(ctx context.Context, listReq *struct {
-	Page     int    `form:"page"`
-	PageSize int    `form:"page_size"`
-	SortBy   string `form:"sort_by"`
-	Order    string `form:"order"`
-}) (*res.DownloadListRes, error) {
+func (l *DownloadLogic) ListDownloads(ctx context.Context, listReq *req.DownloadListReq) (*res.DownloadListRes, error) {
 	page := listReq.Page
 	pageSize := listReq.PageSize
 	if page < 1 {
@@ -110,7 +119,8 @@ func (l *DownloadLogic) ListDownloads(ctx context.Context, listReq *struct {
 		Order:    listReq.Order,
 	})
 	if err != nil {
-		return nil, enum.ErrDatabase.WithMsg(fmt.Sprintf("查询下载列表失败: %v", err))
+		logger.WithTraceID(ctx).Error("查询下载列表失败", zap.Error(err))
+		return nil, enum.ErrDatabase
 	}
 
 	list := make([]*res.DownloadRes, 0, len(items))
@@ -134,7 +144,8 @@ func (l *DownloadLogic) CancelDownload(ctx context.Context, id string) (*res.Dow
 
 	dl, err := model.DownloadGetByID(ctx, id)
 	if err != nil {
-		return nil, enum.ErrDatabase.WithMsg(fmt.Sprintf("查询下载任务失败: %v", err))
+		logger.WithTraceID(ctx).Error("查询下载任务失败", zap.String("download_id", id), zap.Error(err))
+		return nil, enum.ErrDatabase
 	}
 	if dl == nil {
 		return nil, enum.ErrDownloadNotFound
@@ -157,8 +168,15 @@ func (l *DownloadLogic) CancelDownload(ctx context.Context, id string) (*res.Dow
 		l.cleanupDownloadCache(path)
 	}
 
-	if err := model.DownloadMarkCancelled(ctx, id); err != nil {
-		return nil, enum.ErrDatabase.WithMsg(fmt.Sprintf("取消下载任务失败: %v", err))
+	// 带状态守卫地落定取消终态，避免覆盖已完成的下载（终态竞态）
+	affected, err := model.DownloadMarkCancelled(ctx, id)
+	if err != nil {
+		logger.WithTraceID(ctx).Error("取消下载任务失败", zap.String("download_id", id), zap.Error(err))
+		return nil, enum.ErrDatabase
+	}
+	if affected == 0 {
+		// 并发窗口内任务已进入终态（如刚好下载完成）
+		return nil, enum.ErrTaskNotCancelable
 	}
 
 	dl, err = model.DownloadGetByID(ctx, id)
@@ -176,7 +194,8 @@ func (l *DownloadLogic) DeleteDownload(ctx context.Context, id string, deleteFil
 
 	dl, err := model.DownloadGetByID(ctx, id)
 	if err != nil {
-		return enum.ErrDatabase.WithMsg(fmt.Sprintf("查询下载任务失败: %v", err))
+		logger.WithTraceID(ctx).Error("查询下载任务失败", zap.String("download_id", id), zap.Error(err))
+		return enum.ErrDatabase
 	}
 	if dl == nil {
 		return enum.ErrDownloadNotFound
@@ -195,13 +214,13 @@ func (l *DownloadLogic) DeleteDownload(ctx context.Context, id string, deleteFil
 			filePath := filepath.Join(inputDir, dl.FileName)
 			if _, statErr := os.Stat(filePath); statErr == nil {
 				if removeErr := os.Remove(filePath); removeErr != nil {
-					logger.Logger.Warn("删除下载文件失败",
+					logger.WithTraceID(ctx).Warn("删除下载文件失败",
 						zap.String("download_id", id),
 						zap.String("file_path", filePath),
 						zap.Error(removeErr),
 					)
 				} else {
-					logger.Logger.Info("已删除下载文件",
+					logger.WithTraceID(ctx).Info("已删除下载文件",
 						zap.String("download_id", id),
 						zap.String("file_path", filePath),
 					)
@@ -214,17 +233,19 @@ func (l *DownloadLogic) DeleteDownload(ctx context.Context, id string, deleteFil
 		if err == gorm.ErrRecordNotFound {
 			return enum.ErrDownloadNotFound
 		}
-		return enum.ErrDatabase.WithMsg(fmt.Sprintf("删除下载记录失败: %v", err))
+		logger.WithTraceID(ctx).Error("删除下载记录失败", zap.String("download_id", id), zap.Error(err))
+		return enum.ErrDatabase
 	}
 	return nil
 }
 
 // runDownload 后台执行下载任务（在独立 goroutine 中运行）
 func (l *DownloadLogic) runDownload(ctx context.Context, dl *model.Download) {
+	defer l.wg.Done()
 	defer l.unregisterCancel(dl.ID)
 	defer l.unregisterPath(dl.ID)
 
-	logger.Logger.Info("开始执行下载任务",
+	logger.WithTraceID(ctx).Info("开始执行下载任务",
 		zap.String("download_id", dl.ID),
 		zap.String("url", dl.URL),
 	)
@@ -238,10 +259,10 @@ func (l *DownloadLogic) runDownload(ctx context.Context, dl *model.Download) {
 	if err != nil {
 		// 检查是否为取消操作
 		if l.isCancelled(ctx) {
-			model.DownloadMarkCancelled(dbCtx, dl.ID)
+			_, _ = model.DownloadMarkCancelled(dbCtx, dl.ID)
 			return
 		}
-		logger.Logger.Error("解析视频信息失败", zap.String("download_id", dl.ID), zap.Error(err))
+		logger.WithTraceID(ctx).Error("解析视频信息失败", zap.String("download_id", dl.ID), zap.Error(err))
 		model.DownloadMarkFailed(dbCtx, dl.ID, fmt.Sprintf("解析视频信息失败: %v", err))
 		return
 	}
@@ -255,7 +276,7 @@ func (l *DownloadLogic) runDownload(ctx context.Context, dl *model.Download) {
 		"progress_msg": "正在下载...",
 	})
 
-	logger.Logger.Info("视频信息解析完成",
+	logger.WithTraceID(ctx).Info("视频信息解析完成",
 		zap.String("download_id", dl.ID),
 		zap.String("title", title),
 		zap.Int64("duration", duration),
@@ -286,7 +307,7 @@ func (l *DownloadLogic) runDownload(ctx context.Context, dl *model.Download) {
 			// 有冲突，使用带编号的模板
 			baseName := strings.TrimSuffix(filepath.Base(uniquePath), ".mp4")
 			outputTemplate = filepath.Join(inputDir, baseName+".%(ext)s")
-			logger.Logger.Info("文件冲突，自动编号",
+			logger.WithTraceID(ctx).Info("文件冲突，自动编号",
 				zap.String("download_id", dl.ID),
 				zap.String("original", expectedPath),
 				zap.String("unique", uniquePath),
@@ -304,10 +325,10 @@ func (l *DownloadLogic) runDownload(ctx context.Context, dl *model.Download) {
 	if err != nil {
 		// 检查是否为取消操作
 		if l.isCancelled(ctx) {
-			model.DownloadMarkCancelled(dbCtx, dl.ID)
+			_, _ = model.DownloadMarkCancelled(dbCtx, dl.ID)
 			return
 		}
-		logger.Logger.Error("下载失败", zap.String("download_id", dl.ID), zap.Error(err))
+		logger.WithTraceID(ctx).Error("下载失败", zap.String("download_id", dl.ID), zap.Error(err))
 		model.DownloadMarkFailed(dbCtx, dl.ID, fmt.Sprintf("下载失败: %v", err))
 		return
 	}
@@ -322,7 +343,7 @@ func (l *DownloadLogic) runDownload(ctx context.Context, dl *model.Download) {
 
 	// 调用 VideoUpsertByPath 写入 videos 表
 	if _, upsertErr := model.VideoUpsertByPath(dbCtx, downloadedPath, fileSize, duration, 0, 0); upsertErr != nil {
-		logger.Logger.Warn("下载完成但录入视频库失败",
+		logger.WithTraceID(ctx).Warn("下载完成但录入视频库失败",
 			zap.String("download_id", dl.ID),
 			zap.String("path", downloadedPath),
 			zap.Error(upsertErr),
@@ -331,7 +352,7 @@ func (l *DownloadLogic) runDownload(ctx context.Context, dl *model.Download) {
 	}
 
 	model.DownloadMarkCompleted(dbCtx, dl.ID, fileName, fileSize, duration)
-	logger.Logger.Info("下载任务执行完成",
+	logger.WithTraceID(ctx).Info("下载任务执行完成",
 		zap.String("download_id", dl.ID),
 		zap.String("file", downloadedPath),
 	)
@@ -349,8 +370,12 @@ func (l *DownloadLogic) isCancelled(ctx context.Context) bool {
 
 // probeVideoInfo 探测视频标题和时长
 func (l *DownloadLogic) probeVideoInfo(ctx context.Context, url string) (title string, duration int64, err error) {
+	// 元信息探测整体限时，避免远端挂起时无限占用工作槽
+	probeCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+
 	// 获取标题
-	titleCmd := exec.CommandContext(ctx, "yt-dlp", "--print", "title", url)
+	titleCmd := exec.CommandContext(probeCtx, "yt-dlp", "--print", "title", "--", url)
 	titleCmd.Env = os.Environ()
 	titleCmd.Env = append(titleCmd.Env, "PYTHONUNBUFFERED=1")
 	titleOut, titleErr := titleCmd.Output()
@@ -363,7 +388,7 @@ func (l *DownloadLogic) probeVideoInfo(ctx context.Context, url string) (title s
 	}
 
 	// 获取时长（秒）
-	durationCmd := exec.CommandContext(ctx, "yt-dlp", "--print", "duration_string", url)
+	durationCmd := exec.CommandContext(probeCtx, "yt-dlp", "--print", "duration_string", "--", url)
 	durationCmd.Env = os.Environ()
 	durationCmd.Env = append(durationCmd.Env, "PYTHONUNBUFFERED=1")
 	durOut, durErr := durationCmd.Output()
@@ -435,6 +460,8 @@ func (l *DownloadLogic) executeDownload(ctx context.Context, downloadID, url, ou
 	args := []string{
 		"-o", outputTemplate,
 		"--newline",
+		// "--" 终止选项解析，防止 URL 内容被 yt-dlp 当作选项（纵深防御，入参已校验 scheme）
+		"--",
 		url,
 	}
 	if overwrite {
@@ -461,7 +488,9 @@ func (l *DownloadLogic) executeDownload(ctx context.Context, downloadID, url, ou
 
 	// 并发读取 stderr 收集错误信息（正常运行时 stderr 内容很少，仅错误报告）
 	var stderrBuf strings.Builder
+	stderrDone := make(chan struct{})
 	go func() {
+		defer close(stderrDone)
 		scanner := bufio.NewScanner(stderr)
 		for scanner.Scan() {
 			stderrBuf.WriteString(scanner.Text())
@@ -570,6 +599,8 @@ func (l *DownloadLogic) executeDownload(ctx context.Context, downloadID, url, ou
 			return "", 0, ctx.Err()
 		default:
 		}
+		// 等待 stderr 采集 goroutine 结束后再读取，避免 data race
+		<-stderrDone
 		// 拼入 stderr 输出以获得详细错误信息
 		stderrStr := strings.TrimSpace(stderrBuf.String())
 		if stderrStr != "" {
@@ -577,6 +608,9 @@ func (l *DownloadLogic) executeDownload(ctx context.Context, downloadID, url, ou
 		}
 		return "", 0, fmt.Errorf("yt-dlp 执行失败: %w", err)
 	}
+
+	// 成功路径同样等待 stderr goroutine 结束（收集诊断信息用）
+	<-stderrDone
 
 	// 检查 yt-dlp 是否产生了输出文件（exit 0 但无文件 = extractor 未匹配）
 	if dlPath == "" {
@@ -632,7 +666,7 @@ func getInputDir(ctx context.Context) string {
 // updateProgress 更新下载进度
 func (l *DownloadLogic) updateProgress(ctx context.Context, id string, status string, progress int, progressMsg string) {
 	if err := model.DownloadUpdateStatus(ctx, id, status, progress, progressMsg); err != nil {
-		logger.Logger.Error("更新下载进度失败",
+		logger.WithTraceID(ctx).Error("更新下载进度失败",
 			zap.String("download_id", id),
 			zap.Int("progress", progress),
 			zap.Error(err),
@@ -670,7 +704,20 @@ func (l *DownloadLogic) StopAll() {
 		}
 	}
 
-	// 3. 批量标记 DB 中所有运行中/待处理的下载为 cancelled
+	// 3. 等待下载 goroutine 落定终态，避免 DB 连接关闭后仍有写入
+	done := make(chan struct{})
+	go func() {
+		l.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		logger.Logger.Info("所有下载 goroutine 已退出")
+	case <-time.After(10 * time.Second):
+		logger.Logger.Warn("等待下载 goroutine 退出超时，继续关闭流程")
+	}
+
+	// 4. 批量标记 DB 中所有运行中/待处理的下载为 cancelled
 	// （goroutine 的 DownloadMarkCancelled 可能来不及执行，这里兜底）
 	err := model.DB.WithContext(context.Background()).Model(&model.Download{}).
 		Where("status IN ?", []string{

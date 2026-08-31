@@ -14,17 +14,17 @@ func TestValidateUsername(t *testing.T) {
 		username string
 		wantErr  bool
 	}{
-		{"abc", false},          // 纯字母，合规
-		{"abc123", false},       // 字母+数字，合规
-		{"123", false},          // 纯数字（规则允许字母或数字），合规
+		{"abc", false},                   // 纯字母，合规
+		{"abc123", false},                // 字母+数字，合规
+		{"123", false},                   // 纯数字（规则允许字母或数字），合规
 		{strings.Repeat("a", 64), false}, // 上限 64 位
-		{"ab", true},            // 少于 3 位
+		{"ab", true},                     // 少于 3 位
 		{strings.Repeat("a", 65), true},  // 超过 64 位
-		{"abc_", true},          // 含下划线
-		{"abc-1", true},         // 含连字符
-		{"abc 1", true},         // 含空格
-		{"张三", true},           // 非 ASCII 字母
-		{"", true},              // 空
+		{"abc_", true},                   // 含下划线
+		{"abc-1", true},                  // 含连字符
+		{"abc 1", true},                  // 含空格
+		{"张三", true},                     // 非 ASCII 字母
+		{"", true},                       // 空
 	}
 	for _, c := range cases {
 		err := validateUsername(c.username)

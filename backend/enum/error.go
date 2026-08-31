@@ -78,4 +78,5 @@ var (
 	ErrResetTokenTooFrequent = NewBizError(10090008, "请求过于频繁，请稍后再试", 429)
 	ErrInvalidUsername       = NewBizError(10090009, "用户名需为 3-64 位字母和数字的组合", 400)
 	ErrWeakPassword          = NewBizError(10090010, "密码至少 6 位，且必须同时包含字母和数字", 400)
+	ErrTooManyAttempts       = NewBizError(10090011, "登录尝试次数过多，请 15 分钟后再试", 429)
 )

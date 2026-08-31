@@ -151,13 +151,13 @@ func (l *SettingLogic) UpdateSettings(ctx context.Context, updateReq *req.Settin
 
 	// 设置已持久化，立即应用到运行时组件；失败仅告警不阻断保存（重启后仍会生效）
 	if err := l.ApplyASRFromSettings(ctx); err != nil {
-		logger.Logger.Warn("ASR 配置重新加载失败", zap.Error(err))
+		logger.WithTraceID(ctx).Warn("ASR 配置重新加载失败", zap.Error(err))
 	}
 	if err := l.ApplyRepairFromSettings(ctx); err != nil {
-		logger.Logger.Warn("去马赛克配置重新加载失败", zap.Error(err))
+		logger.WithTraceID(ctx).Warn("去马赛克配置重新加载失败", zap.Error(err))
 	}
 	if err := l.ApplyUpscaleFromSettings(ctx); err != nil {
-		logger.Logger.Warn("清晰度去马赛克配置重新加载失败", zap.Error(err))
+		logger.WithTraceID(ctx).Warn("清晰度去马赛克配置重新加载失败", zap.Error(err))
 	}
 
 	return nil

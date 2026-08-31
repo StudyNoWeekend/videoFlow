@@ -31,10 +31,25 @@ type InstallSession struct {
 	Params    InstallParams
 	Status    string          // running, completed, failed
 	History   []ProgressEvent // 所有历史事件，用于重连时回放
+	statusMu  sync.RWMutex    // 保护 Status 的并发读写
 	historyMu sync.RWMutex    // 保护 History 的并发读写
 	Events    chan ProgressEvent
 	Done      chan struct{}
 	Cancel    context.CancelFunc
+}
+
+// GetStatus 线程安全地读取会话状态
+func (s *InstallSession) GetStatus() string {
+	s.statusMu.RLock()
+	defer s.statusMu.RUnlock()
+	return s.Status
+}
+
+// SetStatus 线程安全地更新会话状态
+func (s *InstallSession) SetStatus(status string) {
+	s.statusMu.Lock()
+	s.Status = status
+	s.statusMu.Unlock()
 }
 
 // AppendHistory 追加一个事件到历史记录（线程安全）

@@ -41,18 +41,7 @@ func (ctl *DownloadController) Create(c *gin.Context) {
 // List 分页查询下载任务列表
 // GET /api/v1/downloads
 func (ctl *DownloadController) List(c *gin.Context) {
-	page := 1
-	pageSize := 20
-
-	listReq := struct {
-		Page     int    `form:"page"`
-		PageSize int    `form:"page_size"`
-		SortBy   string `form:"sort_by"`
-		Order    string `form:"order"`
-	}{
-		Page:     page,
-		PageSize: pageSize,
-	}
+	var listReq req.DownloadListReq
 	if err := c.ShouldBindQuery(&listReq); err != nil {
 		response.FailByBizError(c, enum.ErrInvalidParam)
 		return

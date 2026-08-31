@@ -175,14 +175,23 @@ func DownloadMarkFailed(ctx context.Context, id string, errMsg string) error {
 	}).Error
 }
 
-// DownloadMarkCancelled 标记下载任务已取消
-func DownloadMarkCancelled(ctx context.Context, id string) error {
-	return DB.WithContext(ctx).Model(&Download{}).Where("id = ?", id).Updates(map[string]interface{}{
-		"status":       DownloadStatusCancelled,
-		"progress":     0,
-		"progress_msg": "已取消",
-		"updated_at":   time.Now().Unix(),
-	}).Error
+// DownloadMarkCancelled 标记下载任务已取消。
+// 带状态守卫：仅 pending/probing/downloading 可被置为 cancelled，返回受影响行数，
+// 避免并发窗口内覆盖 completed/failed 终态。
+func DownloadMarkCancelled(ctx context.Context, id string) (int64, error) {
+	result := DB.WithContext(ctx).Model(&Download{}).
+		Where("id = ? AND status IN ?", id, []string{
+			DownloadStatusPending,
+			DownloadStatusProbing,
+			DownloadStatusDownloading,
+		}).
+		Updates(map[string]interface{}{
+			"status":       DownloadStatusCancelled,
+			"progress":     0,
+			"progress_msg": "已取消",
+			"updated_at":   time.Now().Unix(),
+		})
+	return result.RowsAffected, result.Error
 }
 
 // DownloadDelete 根据 ID 删除下载任务记录（软删除）

@@ -169,13 +169,26 @@ func TaskClaimPendingTx(tx *gorm.DB, taskType string) (*Task, error) {
 	}
 
 	now := time.Now().Unix()
+	// 条件更新：仅当任务仍为 pending 时认领成功，避免并发 worker 重复认领同一任务
+	result := tx.Model(&Task{}).
+		Where("id = ? AND status = ?", task.ID, TaskStatusPending).
+		Updates(map[string]interface{}{
+			"status":     TaskStatusRunning,
+			"progress":   0,
+			"error_msg":  "",
+			"updated_at": now,
+		})
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	if result.RowsAffected == 0 {
+		// 已被其他 worker 认领，视为本轮无可认领任务
+		return nil, nil
+	}
 	task.Status = TaskStatusRunning
 	task.Progress = 0
 	task.ErrorMsg = ""
 	task.UpdatedAt = now
-	if err := tx.Save(&task).Error; err != nil {
-		return nil, err
-	}
 	return &task, nil
 }
 

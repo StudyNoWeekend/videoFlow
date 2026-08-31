@@ -128,7 +128,7 @@ func (c *ASRClient) Transcribe(ctx context.Context, audioPath string) ([]Segment
 	}
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 
-	logger.Logger.Info("调用 ASR 服务",
+	logger.WithTraceID(ctx).Info("调用 ASR 服务",
 		zap.String("url", reqURL.String()),
 		zap.String("audio", audioPath),
 		zap.String("language", c.language),
@@ -142,7 +142,7 @@ func (c *ASRClient) Transcribe(ctx context.Context, audioPath string) ([]Segment
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		logger.Logger.Error("ASR 请求失败", zap.Error(err), zap.String("url", reqURL.String()))
+		logger.WithTraceID(ctx).Error("ASR 请求失败", zap.Error(err), zap.String("url", reqURL.String()))
 		return nil, fmt.Errorf("ASR 请求失败: %w", err)
 	}
 	defer resp.Body.Close()
@@ -153,7 +153,7 @@ func (c *ASRClient) Transcribe(ctx context.Context, audioPath string) ([]Segment
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		logger.Logger.Error("ASR 返回非 200", zap.Int("status", resp.StatusCode), zap.String("body", string(respBody)))
+		logger.WithTraceID(ctx).Error("ASR 返回非 200", zap.Int("status", resp.StatusCode), zap.String("body", string(respBody)))
 		return nil, fmt.Errorf("ASR 返回错误状态码: %d, body: %s", resp.StatusCode, string(respBody))
 	}
 

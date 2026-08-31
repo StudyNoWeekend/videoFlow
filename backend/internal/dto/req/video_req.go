@@ -7,8 +7,8 @@ type VideoScanReq struct {
 
 // VideoListReq 视频列表分页查询请求
 type VideoListReq struct {
-	Page     int    `form:"page" binding:"omitempty,gte=1"`
-	PageSize int    `form:"page_size" binding:"omitempty,gte=1,lte=100"`
+	Page     int `form:"page" binding:"omitempty,gte=1"`
+	PageSize int `form:"page_size" binding:"omitempty,gte=1,lte=100"`
 	// SortBy 排序字段，目前支持 size；为空时使用默认排序（更新时间倒序）
 	SortBy string `form:"sort_by" binding:"omitempty,oneof=size"`
 	// Order 排序方向：asc 正序 / desc 倒序，仅配合 SortBy 使用

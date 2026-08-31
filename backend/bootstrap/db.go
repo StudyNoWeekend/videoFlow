@@ -48,7 +48,10 @@ func InitDB(cfg *AppConfigDatabase) (*gorm.DB, error) {
 		},
 	)
 
-	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{
+	// 启用 WAL 模式与 busy_timeout：调度器多 worker 并发写 + 扫描器 + API 读并发时，
+	// 默认 rollback journal 模式容易出现 "database is locked"，WAL 允许读写并行
+	dsn := dbPath + "?_journal_mode=WAL&_busy_timeout=5000"
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
 		Logger: gormLogger,
 	})
 	if err != nil {

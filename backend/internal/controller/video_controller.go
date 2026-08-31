@@ -6,7 +6,6 @@ import (
 	"video-captions/enum"
 	"video-captions/internal/dto/req"
 	"video-captions/internal/logic"
-	"video-captions/internal/model"
 	"video-captions/utils/response"
 )
 
@@ -31,15 +30,7 @@ func (ctl *VideoController) Scan(c *gin.Context) {
 		return
 	}
 
-	// 若请求体 path 为空，则使用配置的 video_dir
-	if scanReq.Path == "" {
-		scanReq.Path = model.SettingGet(c.Request.Context(), model.SettingKeyVideoDir)
-	}
-	if scanReq.Path == "" {
-		response.FailByBizError(c, enum.ErrInvalidParam.WithMsg("扫描路径为空，且未配置视频目录"))
-		return
-	}
-
+	// path 为空时由 logic 层回退到配置的视频目录
 	res, err := ctl.videoLogic.ScanDir(c.Request.Context(), &scanReq)
 	if err != nil {
 		HandleError(c, err)

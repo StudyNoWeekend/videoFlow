@@ -38,7 +38,8 @@ func (l *TaskLogic) CreateTask(ctx context.Context, createReq *req.TaskCreateReq
 
 	video, err := model.VideoGetByID(ctx, createReq.VideoID)
 	if err != nil {
-		return nil, enum.ErrDatabase.WithMsg(fmt.Sprintf("查询视频失败: %v", err))
+		logger.WithTraceID(ctx).Error("查询视频失败", zap.Error(err))
+		return nil, enum.ErrDatabase
 	}
 	if video == nil {
 		return nil, enum.ErrNotFound.WithMsg("视频不存在")
@@ -57,7 +58,8 @@ func (l *TaskLogic) CreateTask(ctx context.Context, createReq *req.TaskCreateReq
 
 	// 防重复提交：同一视频不允许同时存在同类型的 pending/running/cancelling 任务
 	if exists, err := model.TaskExistsPendingOrRunningByVideoAndType(ctx, createReq.VideoID, createReq.TaskType); err != nil {
-		return nil, enum.ErrDatabase.WithMsg(fmt.Sprintf("查重失败: %v", err))
+		logger.WithTraceID(ctx).Error("查重失败", zap.Error(err))
+		return nil, enum.ErrDatabase
 	} else if exists {
 		return nil, enum.ErrTaskDuplicate
 	}
@@ -82,7 +84,8 @@ func (l *TaskLogic) CreateTask(ctx context.Context, createReq *req.TaskCreateReq
 		}
 		return model.VideoSetTaskStatusTx(tx, video.ID, task.TaskType, model.TaskStatusPending)
 	}); err != nil {
-		return nil, enum.ErrDatabase.WithMsg(fmt.Sprintf("创建任务失败: %v", err))
+		logger.WithTraceID(ctx).Error("创建任务失败", zap.Error(err))
+		return nil, enum.ErrDatabase
 	}
 
 	return taskModelToResWithVideo(task, video), nil
@@ -137,7 +140,8 @@ func (l *TaskLogic) RetryTask(ctx context.Context, taskID string) (*res.TaskRes,
 	// 重试前同样校验任务依赖组件是否就绪，避免组件未就绪时重置后再次失败
 	task, err := model.TaskGetByID(ctx, taskID)
 	if err != nil {
-		return nil, enum.ErrDatabase.WithMsg(fmt.Sprintf("查询任务失败: %v", err))
+		logger.WithTraceID(ctx).Error("查询任务失败", zap.Error(err))
+		return nil, enum.ErrDatabase
 	}
 	if task == nil {
 		return nil, enum.ErrTaskNotFound
@@ -170,16 +174,19 @@ func (l *TaskLogic) RetryTask(ctx context.Context, taskID string) (*res.TaskRes,
 		if err == enum.ErrTaskNotFailed {
 			return nil, err
 		}
-		return nil, enum.ErrDatabase.WithMsg(fmt.Sprintf("重试任务失败: %v", err))
+		logger.WithTraceID(ctx).Error("重试任务失败", zap.Error(err))
+		return nil, enum.ErrDatabase
 	}
 
 	task, err = model.TaskGetByID(ctx, taskID)
 	if err != nil {
-		return nil, enum.ErrDatabase.WithMsg(fmt.Sprintf("查询任务失败: %v", err))
+		logger.WithTraceID(ctx).Error("查询任务失败", zap.Error(err))
+		return nil, enum.ErrDatabase
 	}
 	video, err := model.VideoGetByID(ctx, task.VideoID)
 	if err != nil {
-		return nil, enum.ErrDatabase.WithMsg(fmt.Sprintf("查询视频失败: %v", err))
+		logger.WithTraceID(ctx).Error("查询视频失败", zap.Error(err))
+		return nil, enum.ErrDatabase
 	}
 
 	return taskModelToResWithVideo(task, video), nil
@@ -207,7 +214,8 @@ func (l *TaskLogic) ListTasks(ctx context.Context, listReq *req.TaskListReq) (*r
 		Order:    listReq.Order,
 	})
 	if err != nil {
-		return nil, enum.ErrDatabase.WithMsg(fmt.Sprintf("查询任务列表失败: %v", err))
+		logger.WithTraceID(ctx).Error("查询任务列表失败", zap.Error(err))
+		return nil, enum.ErrDatabase
 	}
 
 	list := make([]*res.TaskRes, 0, len(items))
@@ -237,19 +245,22 @@ func (l *TaskLogic) CancelTask(ctx context.Context, taskID string) (*res.TaskRes
 		if errors.As(err, &bizErr) {
 			return nil, bizErr
 		}
-		return nil, enum.ErrInternalServer.WithMsg(fmt.Sprintf("取消任务失败: %v", err))
+		logger.WithTraceID(ctx).Error("取消任务失败", zap.Error(err))
+		return nil, enum.ErrInternalServer
 	}
 
 	task, err := model.TaskGetByID(ctx, taskID)
 	if err != nil {
-		return nil, enum.ErrDatabase.WithMsg(fmt.Sprintf("查询任务失败: %v", err))
+		logger.WithTraceID(ctx).Error("查询任务失败", zap.Error(err))
+		return nil, enum.ErrDatabase
 	}
 	if task == nil {
 		return nil, enum.ErrTaskNotFound
 	}
 	video, err := model.VideoGetByID(ctx, task.VideoID)
 	if err != nil {
-		return nil, enum.ErrDatabase.WithMsg(fmt.Sprintf("查询视频失败: %v", err))
+		logger.WithTraceID(ctx).Error("查询视频失败", zap.Error(err))
+		return nil, enum.ErrDatabase
 	}
 
 	return taskModelToResWithVideo(task, video), nil
@@ -293,7 +304,8 @@ func (l *TaskLogic) DeleteTask(ctx context.Context, taskID string, deleteFiles b
 		if bizErr, ok := err.(*enum.BizError); ok {
 			return bizErr
 		}
-		return enum.ErrDatabase.WithMsg(fmt.Sprintf("删除任务失败: %v", err))
+		logger.WithTraceID(ctx).Error("删除任务失败", zap.Error(err))
+		return enum.ErrDatabase
 	}
 
 	if deleteFiles && delTask != nil {
@@ -348,7 +360,8 @@ func (l *TaskLogic) BatchDelete(ctx context.Context, deleteReq *req.TaskBatchDel
 				result.Skipped++
 				continue
 			}
-			return nil, enum.ErrDatabase.WithMsg(fmt.Sprintf("删除任务失败: %v", err))
+			logger.WithTraceID(ctx).Error("删除任务失败", zap.Error(err))
+			return nil, enum.ErrDatabase
 		}
 
 		if deleteReq.DeleteFiles && delTask != nil {
@@ -369,7 +382,7 @@ func (l *TaskLogic) BatchDelete(ctx context.Context, deleteReq *req.TaskBatchDel
 func deleteTaskOutputFiles(ctx context.Context, task *model.Task) {
 	video, err := model.VideoGetByID(ctx, task.VideoID)
 	if err != nil || video == nil {
-		logger.Logger.Warn("删除任务输出文件失败：视频记录不存在",
+		logger.WithTraceID(ctx).Warn("删除任务输出文件失败：视频记录不存在",
 			zap.String("task_id", task.ID),
 		)
 		return
@@ -380,7 +393,7 @@ func deleteTaskOutputFiles(ctx context.Context, task *model.Task) {
 
 	removeFile := func(path string) {
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-			logger.Logger.Warn("删除任务输出文件失败",
+			logger.WithTraceID(ctx).Warn("删除任务输出文件失败",
 				zap.String("task_id", task.ID),
 				zap.String("path", path),
 				zap.Error(err),

@@ -2,21 +2,21 @@ package req
 
 // TaskCreateReq 创建任务请求
 type TaskCreateReq struct {
-	VideoID  string `json:"video_id" binding:"required"`
+	VideoID  string `json:"video_id" binding:"required,max=64"`
 	TaskType string `json:"task_type" binding:"required,oneof=subtitle subtitle_burn deblur upscale"`
 	// SourcePath 可选：实际处理源文件路径，为空时默认使用关联视频（如仅选择原视频）
-	SourcePath string `json:"source_path"`
+	SourcePath string `json:"source_path" binding:"omitempty,max=1024"`
 	// Overwrite 是否覆盖处理源文件：仅当选择了衍生视频（SourcePath 非原视频）时有效，
 	// 任务输出直接替换处理源文件本身，不再生成新的输出文件
 	Overwrite bool `json:"overwrite"`
 	// TargetWidth 清晰度修复目标宽度（像素），仅 upscale 任务时需要
-	TargetWidth int `json:"target_width"`
+	TargetWidth int `json:"target_width" binding:"omitempty,gte=1,lte=8192"`
 	// TargetHeight 清晰度修复目标高度（像素），仅 upscale 任务时需要
-	TargetHeight int `json:"target_height"`
+	TargetHeight int `json:"target_height" binding:"omitempty,gte=1,lte=8192"`
 	// UpscaleProcessor 清晰度修复处理器类型，创建清晰度去马赛克任务时前端弹窗选择
-	UpscaleProcessor string `json:"upscale_processor"`
+	UpscaleProcessor string `json:"upscale_processor" binding:"omitempty,max=64"`
 	// UpscaleModel 清晰度修复模型/着色器名，创建清晰度去马赛克任务时前端弹窗选择
-	UpscaleModel string `json:"upscale_model"`
+	UpscaleModel string `json:"upscale_model" binding:"omitempty,max=128"`
 	// UpscaleNoiseLevel 降噪等级，仅 realesrgan/realcugan 生效（-1=无/保守，0-3 递增），创建清晰度去马赛克任务时前端弹窗选择
 	UpscaleNoiseLevel int `json:"upscale_noise_level" binding:"omitempty,gte=-1,lte=3"`
 }

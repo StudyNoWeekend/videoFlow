@@ -4,9 +4,13 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 )
+
+// sessionRetention 会话进入终态后在内存中的保留时长，超时后回收，避免 sessions 无限增长
+const sessionRetention = 10 * time.Minute
 
 // SessionManager 管理安装会话
 type SessionManager struct {
@@ -62,7 +66,7 @@ func (sm *SessionManager) GetActiveSessions() []*InstallSession {
 	defer sm.mu.RUnlock()
 	var active []*InstallSession
 	for _, s := range sm.sessions {
-		if s.Status == "running" {
+		if s.GetStatus() == "running" {
 			active = append(active, s)
 		}
 	}
@@ -74,7 +78,7 @@ func (sm *SessionManager) CancelSession(id string) {
 	sm.mu.RLock()
 	session, ok := sm.sessions[id]
 	sm.mu.RUnlock()
-	if ok && session.Status == "running" {
+	if ok && session.GetStatus() == "running" {
 		session.Cancel()
 	}
 }
@@ -96,7 +100,9 @@ func (sm *SessionManager) runInstallation(ctx context.Context, session *InstallS
 		close(session.Done)
 	}()
 
-	// 包装 events channel: 记录所有发送的事件到 History
+	// 包装 events channel: 记录所有发送的事件到 History。
+	// 转发到 session.Events 时带超时：无 SSE 消费者（或消费者卡住）时丢弃事件，
+	// 保证安装流程不被阻塞；完整事件已写入 History，重连时可回放。
 	events := make(chan ProgressEvent, 100)
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -104,7 +110,10 @@ func (sm *SessionManager) runInstallation(ctx context.Context, session *InstallS
 		defer wg.Done()
 		for e := range events {
 			session.AppendHistory(e)
-			session.Events <- e
+			select {
+			case session.Events <- e:
+			case <-time.After(5 * time.Second):
+			}
 		}
 	}()
 
@@ -131,9 +140,9 @@ func (sm *SessionManager) runInstallation(ctx context.Context, session *InstallS
 	wg.Wait()
 
 	if err != nil {
-		session.Status = "failed"
+		session.SetStatus("failed")
 	} else {
-		session.Status = "completed"
+		session.SetStatus("completed")
 	}
 
 	// Session 完成后保存历史记录到 history map，按组件类型保留
@@ -144,6 +153,14 @@ func (sm *SessionManager) runInstallation(ctx context.Context, session *InstallS
 	sm.mu.Lock()
 	sm.history[session.Params.ComponentType] = historyCopy
 	sm.mu.Unlock()
+
+	// 终态保留一段时间供前端查询，之后从内存回收，避免 sessions 无限增长
+	go func() {
+		time.Sleep(sessionRetention)
+		sm.mu.Lock()
+		delete(sm.sessions, session.ID)
+		sm.mu.Unlock()
+	}()
 }
 
 // sendEvent 发送进度事件

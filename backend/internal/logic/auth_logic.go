@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"math/big"
 	"sync"
 	"time"
 
@@ -15,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
 
 	"video-captions/enum"
 	"video-captions/internal/dto/req"
@@ -39,6 +39,48 @@ var resetTokenCoolDownMap = struct {
 	sync.Mutex
 	last map[string]time.Time
 }{last: make(map[string]time.Time)}
+
+// 登录失败速率限制：同一用户名在窗口内连续失败达到上限后拒绝登录，
+// 防止暴力破解。进程内实现，重启即清零（单机部署下可接受）。
+const (
+	loginMaxFailures = 5
+	loginWindow      = 15 * time.Minute
+)
+
+// loginFailures 记录各用户名在统计窗口内的登录失败时间
+var loginFailures = struct {
+	sync.Mutex
+	m map[string][]time.Time
+}{m: make(map[string][]time.Time)}
+
+// loginAllowed 检查该用户名是否仍允许尝试登录（先清理窗口外的过期记录）
+func loginAllowed(username string) bool {
+	loginFailures.Lock()
+	defer loginFailures.Unlock()
+	now := time.Now()
+	kept := loginFailures.m[username][:0]
+	for _, t := range loginFailures.m[username] {
+		if now.Sub(t) < loginWindow {
+			kept = append(kept, t)
+		}
+	}
+	loginFailures.m[username] = kept
+	return len(kept) < loginMaxFailures
+}
+
+// loginRecordFailure 记录一次登录失败
+func loginRecordFailure(username string) {
+	loginFailures.Lock()
+	loginFailures.m[username] = append(loginFailures.m[username], time.Now())
+	loginFailures.Unlock()
+}
+
+// loginClear 登录成功后清空该用户名的失败记录
+func loginClear(username string) {
+	loginFailures.Lock()
+	delete(loginFailures.m, username)
+	loginFailures.Unlock()
+}
 
 // AuthLogic 认证业务逻辑
 type AuthLogic struct{}
@@ -115,19 +157,28 @@ func (l *AuthLogic) Init(ctx context.Context, r *req.InitReq) (*res.LoginRes, er
 
 // ----- 登录 -----
 
-// LoginByPassword 密码登录（支持用户名或邮箱）
+// LoginByPassword 密码登录（支持用户名或邮箱）。
+// 无论用户名不存在还是密码错误，返回相同的错误信息，避免用户名枚举。
 func (l *AuthLogic) LoginByPassword(ctx context.Context, r *req.LoginPwdReq) (*res.LoginRes, error) {
+	if !loginAllowed(r.Username) {
+		return nil, enum.ErrTooManyAttempts
+	}
+
 	var user model.User
 	err := model.DB.WithContext(ctx).
 		Where("username = ?", r.Username).
 		First(&user).Error
 	if err != nil {
-		return nil, enum.ErrUserNotFound
+		loginRecordFailure(r.Username)
+		return nil, enum.ErrInvalidPassword.WithMsg("用户名或密码错误")
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(r.Password)); err != nil {
-		return nil, enum.ErrInvalidPassword
+		loginRecordFailure(r.Username)
+		return nil, enum.ErrInvalidPassword.WithMsg("用户名或密码错误")
 	}
+
+	loginClear(r.Username)
 
 	token, err := l.generateTokenFromUser(ctx, &user)
 	if err != nil {
@@ -192,6 +243,11 @@ func (l *AuthLogic) generateResetToken(ctx context.Context, username string) (ra
 	// 对令牌做 SHA256 hash 后存入数据库
 	tokenHash := l.hashToken(rawToken)
 
+	// 顺手清理已过期的历史令牌，避免表无限增长
+	model.DB.WithContext(ctx).
+		Where("expires_at < ?", time.Now().UnixMilli()).
+		Delete(&model.ResetToken{})
+
 	rt := model.ResetToken{
 		UserID:    user.ID,
 		Token:     tokenHash,
@@ -237,7 +293,7 @@ func (l *AuthLogic) GenerateResetTokenForAPI(ctx context.Context, username strin
 	resetTokenCoolDownMap.Unlock()
 
 	// 令牌输出到日志（stdout + 日志文件），例如通过 docker compose logs 查看
-	logger.Logger.Info("密码重置令牌已生成 (reset token generated)",
+	logger.WithTraceID(ctx).Info("密码重置令牌已生成 (reset token generated)",
 		zap.String("username", username),
 		zap.String("token", rawToken),
 		zap.String("expire", expire),
@@ -276,13 +332,30 @@ func (l *AuthLogic) ResetPassword(ctx context.Context, r *req.ResetPasswordReq) 
 		return enum.ErrInternalServer.WithMsg("密码加密失败")
 	}
 
-	// 更新密码
-	if err := model.DB.WithContext(ctx).Model(&user).Update("password", string(hashedPwd)).Error; err != nil {
-		return enum.ErrDatabase.WithMsg("更新密码失败")
+	// 更新密码并在同一事务内原子占用令牌，保证令牌一次性：
+	// used 条件更新失败（并发已占用）时整体回滚，密码保持不变
+	err = model.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&user).Update("password", string(hashedPwd)).Error; err != nil {
+			return enum.ErrDatabase.WithMsg("更新密码失败")
+		}
+		res := tx.Model(&model.ResetToken{}).
+			Where("id = ? AND used = ?", rt.ID, false).
+			Update("used", true)
+		if res.Error != nil {
+			return enum.ErrDatabase.WithMsg("标记令牌已使用失败")
+		}
+		if res.RowsAffected == 0 {
+			return enum.ErrInvalidToken
+		}
+		return nil
+	})
+	if err != nil {
+		var bizErr *enum.BizError
+		if errors.As(err, &bizErr) {
+			return bizErr
+		}
+		return enum.ErrInternalServer
 	}
-
-	// 标记令牌已使用
-	model.DB.WithContext(ctx).Model(&rt).Update("used", true)
 
 	return nil
 }
@@ -335,18 +408,6 @@ func (l *AuthLogic) generateSecret() string {
 func (l *AuthLogic) hashToken(raw string) string {
 	h := sha256.Sum256([]byte(raw))
 	return hex.EncodeToString(h[:])
-}
-
-func (l *AuthLogic) generateRandomCode() (string, error) {
-	code := ""
-	for i := 0; i < 6; i++ {
-		n, err := rand.Int(rand.Reader, big.NewInt(10))
-		if err != nil {
-			return "", err
-		}
-		code += fmt.Sprintf("%d", n.Int64())
-	}
-	return code, nil
 }
 
 func (l *AuthLogic) generateTokenFromUser(ctx context.Context, user *model.User) (string, error) {

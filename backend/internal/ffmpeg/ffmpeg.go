@@ -148,8 +148,8 @@ func buildSSHBaseArgs(cfg Config) []string {
 	args := []string{
 		"-o", "BatchMode=yes",
 		"-o", "ConnectTimeout=10",
-		"-o", "StrictHostKeyChecking=no",
-		"-o", "UserKnownHostsFile=/dev/null",
+		// accept-new：首次连接自动记录主机密钥，之后严格校验，防止中间人攻击
+		"-o", "StrictHostKeyChecking=accept-new",
 	}
 	if len(cfg.SSHArgs) > 0 {
 		args = append(args, cfg.SSHArgs...)

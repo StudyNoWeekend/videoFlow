@@ -566,7 +566,7 @@ func (e *Executor) Execute(ctx context.Context, videoPath string, targetWidth, t
 	// 历史遗留的 mps/xpu 等设备值不会被传入命令（等同 CPU 运行），
 	// 记录告警避免误以为已启用对应加速。
 	if cfg.Device != "" && cfg.Device != "cpu" && !strings.HasPrefix(cfg.Device, "cuda") {
-		logger.Logger.Warn("清晰度去马赛克设备配置当前实现中不可用，已按 CPU 运行",
+		logger.WithTraceID(ctx).Warn("清晰度去马赛克设备配置当前实现中不可用，已按 CPU 运行",
 			zap.String("configured_device", cfg.Device),
 		)
 	}

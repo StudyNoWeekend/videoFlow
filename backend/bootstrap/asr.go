@@ -2,7 +2,6 @@ package bootstrap
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 
 	"video-captions/internal/asr"
@@ -18,7 +17,9 @@ func InitASR() error {
 
 	url := model.SettingGetOrDefault(ctx, model.SettingKeyASRURL, defaultASRStr(model.DefaultASRURL, ""))
 	if url == "" {
-		return fmt.Errorf("ASR URL 未配置")
+		// ASR 未配置不阻断启动，仅在使用字幕功能时给出明确错误
+		ASRProvider = nil
+		return nil
 	}
 
 	language := model.SettingGetOrDefault(ctx, model.SettingKeyASRLanguage, model.DefaultASRLanguage)

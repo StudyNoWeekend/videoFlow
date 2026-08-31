@@ -3,9 +3,11 @@ package model
 import (
 	"context"
 	"errors"
+	"time"
 
 	"go.uber.org/zap"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"video-captions/utils/logger"
 )
@@ -46,10 +48,12 @@ const (
 
 // 统一设置项默认值（字符串形式持久化）
 const (
-	DefaultVideoDir          = ""
-	DefaultOutputDir         = "/output"
-	DefaultScanInterval      = "60"
-	DefaultASRURL            = "http://1.12.70.219:9999/asr"
+	DefaultVideoDir     = ""
+	DefaultOutputDir    = "/output"
+	DefaultScanInterval = "60"
+	// DefaultASRURL ASR 服务默认地址；出于安全考虑不内置任何公网地址，
+	// 部署时通过 settings 页面、config.yaml 的 asr.url 或环境变量配置
+	DefaultASRURL            = ""
 	DefaultASRLanguage       = "zh"
 	DefaultASRVadFilter      = "false"
 	DefaultASRTask           = "transcribe"
@@ -90,11 +94,21 @@ func SettingGet(ctx context.Context, key string) string {
 	return s.Value
 }
 
-// SettingSet 保存或更新配置项
+// SettingSet 保存或更新配置项。
+// 使用 Upsert 仅更新 value/updated_at，避免 Save 全字段更新把已存在记录的 created_at 清零。
 func SettingSet(ctx context.Context, key string, value string) error {
-	return DB.WithContext(ctx).Save(&Setting{
-		Key:   key,
-		Value: value,
+	now := time.Now().Unix()
+	return DB.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "key"}},
+		DoUpdates: clause.Assignments(map[string]interface{}{
+			"value":      value,
+			"updated_at": now,
+		}),
+	}).Create(&Setting{
+		Key:       key,
+		Value:     value,
+		CreatedAt: now,
+		UpdatedAt: now,
 	}).Error
 }
 

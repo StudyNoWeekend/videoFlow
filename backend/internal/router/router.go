@@ -3,6 +3,7 @@ package router
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -10,6 +11,7 @@ import (
 	"video-captions/bootstrap"
 	"video-captions/internal/logic"
 	"video-captions/internal/middleware"
+	"video-captions/utils/logger"
 	"video-captions/utils/response"
 )
 
@@ -57,7 +59,8 @@ func SetupRouter(cfg *bootstrap.AppConfigHTTP) *gin.Engine {
 	return r
 }
 
-// traceMiddleware 注入或透传 trace_id
+// traceMiddleware 注入或透传 trace_id。
+// 同时写入 gin.Keys（响应头、访问日志）与 request context（透传给 logic/基础设施层日志）。
 func traceMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		traceID := c.GetHeader("X-Trace-ID")
@@ -66,6 +69,7 @@ func traceMiddleware() gin.HandlerFunc {
 		}
 		c.Set("trace_id", traceID)
 		c.Writer.Header().Set("X-Trace-ID", traceID)
+		c.Request = c.Request.WithContext(logger.ContextWithTraceID(c.Request.Context(), traceID))
 		c.Next()
 	}
 }
@@ -75,22 +79,41 @@ func generateTraceID() string {
 	return fmt.Sprintf("%d", time.Now().UnixNano())
 }
 
-// corsMiddleware 开发环境 CORS 配置
+// corsMiddleware CORS 配置。
+// 生产环境由 nginx 同源提供服务，不返回任何 CORS 头；
+// 开发环境仅放行本机来源（前端 dev server），杜绝任意 Origin 反射。
 func corsMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		origin := c.GetHeader("Origin")
-		if origin == "" {
-			origin = "*"
+		isDev := bootstrap.Config != nil && bootstrap.Config.App.Env != "prod"
+		if isDev && isLocalOrigin(origin) {
+			c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
+			c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+			c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Trace-ID")
+			c.Writer.Header().Set("Vary", "Origin")
 		}
-		c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
-		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Trace-ID")
-		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(http.StatusNoContent)
 			return
 		}
 		c.Next()
+	}
+}
+
+// isLocalOrigin 判断 Origin 是否为本机开发来源（localhost / 127.0.0.1 / ::1）
+func isLocalOrigin(origin string) bool {
+	if origin == "" {
+		return false
+	}
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	switch u.Hostname() {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	default:
+		return false
 	}
 }
 

@@ -91,7 +91,7 @@ func (s *TaskScheduler) Start(ctx context.Context) error {
 	s.wg.Add(1)
 	go s.supervisorLoop()
 
-	logger.Logger.Info("任务调度器已启动",
+	logger.WithTraceID(ctx).Info("任务调度器已启动",
 		zap.Int("subtitle_concurrency", int(s.subtitleConcurrency.Load())),
 		zap.Int("subtitle_burn_concurrency", int(s.subtitleBurnConcurrency.Load())),
 		zap.Int("repair_concurrency", int(s.repairConcurrency.Load())),
@@ -424,7 +424,7 @@ func (s *TaskScheduler) CancelByID(ctx context.Context, taskID string) error {
 		return enum.ErrDatabase.WithMsg(fmt.Sprintf("取消任务失败: %v", res.Error))
 	}
 	if res.RowsAffected > 0 {
-		logger.Logger.Info("等待中的任务已取消", zap.String("task_id", taskID))
+		logger.WithTraceID(ctx).Info("等待中的任务已取消", zap.String("task_id", taskID))
 		// 等待中的任务被直接落定为已取消，同步视频对应任务类型的状态字段
 		// 使用 Resync 而非直接 Set cancelled：同类型可能有多个 pending 排队中，
 		// 取消的不是最旧一条时，视频字段应回退到更早的任务状态（或清空），
@@ -432,7 +432,7 @@ func (s *TaskScheduler) CancelByID(ctx context.Context, taskID string) error {
 		var t model.Task
 		if err := s.db.WithContext(dbCtx).Select("video_id", "task_type").Where("id = ?", taskID).First(&t).Error; err == nil {
 			if err := model.VideoResyncTaskStatusTx(s.db.WithContext(dbCtx), t.VideoID, t.TaskType); err != nil {
-				logger.Logger.Error("同步视频任务状态失败", zap.String("task_id", taskID), zap.Error(err))
+				logger.WithTraceID(ctx).Error("同步视频任务状态失败", zap.String("task_id", taskID), zap.Error(err))
 			}
 		}
 		return nil
@@ -453,7 +453,7 @@ func (s *TaskScheduler) CancelByID(ctx context.Context, taskID string) error {
 		if cancel := s.getCancel(taskID); cancel != nil {
 			cancel()
 		}
-		logger.Logger.Info("运行中的任务取消请求已发送", zap.String("task_id", taskID))
+		logger.WithTraceID(ctx).Info("运行中的任务取消请求已发送", zap.String("task_id", taskID))
 		return nil
 	}
 
@@ -530,12 +530,15 @@ func (s *TaskScheduler) dispatchPendingByType(taskType string, limit int32) {
 			select {
 			case s.taskCh <- taskCopy:
 			case <-s.ctx.Done():
-				// 调度器已停止，将已认领的任务回退为 pending
-				if err := model.TaskResetFailedTx(s.db.WithContext(s.ctx), taskCopy.ID); err != nil {
+				// 调度器已停止，将已认领的任务回退为 pending。
+				// s.ctx 已取消，直接用于查询会立即失败，这里需用派生的
+				// 未取消 context 完成落库（进程退出前的最后写入）。
+				resetCtx := context.WithoutCancel(s.ctx)
+				if err := model.TaskResetFailedTx(s.db.WithContext(resetCtx), taskCopy.ID); err != nil {
 					logger.Logger.Error("任务回退失败", zap.String("task_id", taskCopy.ID), zap.Error(err))
 					return
 				}
-				if err := model.VideoSetTaskStatusTx(s.db.WithContext(s.ctx), taskCopy.VideoID, taskCopy.TaskType, model.TaskStatusPending); err != nil {
+				if err := model.VideoSetTaskStatusTx(s.db.WithContext(resetCtx), taskCopy.VideoID, taskCopy.TaskType, model.TaskStatusPending); err != nil {
 					logger.Logger.Error("回退视频任务状态失败", zap.String("task_id", taskCopy.ID), zap.Error(err))
 				}
 			}
@@ -545,7 +548,7 @@ func (s *TaskScheduler) dispatchPendingByType(taskType string, limit int32) {
 
 // processTask 根据任务类型分发到对应的执行逻辑
 func (s *TaskScheduler) processTask(ctx context.Context, task *model.Task, out *taskOutput) {
-	logger.Logger.Info("开始执行任务",
+	logger.WithTraceID(ctx).Info("开始执行任务",
 		zap.String("task_id", task.ID),
 		zap.String("task_type", task.TaskType),
 		zap.String("video_id", task.VideoID),
@@ -554,7 +557,7 @@ func (s *TaskScheduler) processTask(ctx context.Context, task *model.Task, out *
 	// panic 保护，避免单个任务导致 worker 崩溃
 	defer func() {
 		if r := recover(); r != nil {
-			logger.Logger.Error("任务执行发生 panic",
+			logger.WithTraceID(ctx).Error("任务执行发生 panic",
 				zap.String("task_id", task.ID),
 				zap.String("task_type", task.TaskType),
 				zap.Any("recover", r),
@@ -599,7 +602,7 @@ func (s *TaskScheduler) processSubtitleTask(ctx context.Context, task *model.Tas
 		if duration, err := ffmpeg.GetDuration(ctx, video.Path); err == nil && duration > 0 {
 			newDuration := int64(duration + 0.5)
 			if e := s.db.WithContext(ctx).Model(&model.Video{}).Where("id = ?", video.ID).Update("duration", newDuration).Error; e != nil {
-				logger.Logger.Error("更新视频时长失败",
+				logger.WithTraceID(ctx).Error("更新视频时长失败",
 					zap.String("video_id", video.ID),
 					zap.Error(e),
 				)
@@ -625,13 +628,13 @@ func (s *TaskScheduler) processSubtitleTask(ctx context.Context, task *model.Tas
 		return
 	}
 	s.updateProgress(ctx, task.ID, 95, "字幕文件生成完成")
-	logger.Logger.Info("字幕文件已保存",
+	logger.WithTraceID(ctx).Info("字幕文件已保存",
 		zap.String("task_id", task.ID),
 		zap.String("srt_file", srtFilePath),
 	)
 
 	s.markCompleted(ctx, task.ID, resultJSON, "字幕生成完成")
-	logger.Logger.Info("字幕任务执行完成",
+	logger.WithTraceID(ctx).Info("字幕任务执行完成",
 		zap.String("task_id", task.ID),
 		zap.String("srt_file", srtFilePath),
 	)
@@ -750,10 +753,10 @@ func (s *TaskScheduler) processSubtitleBurnTask(ctx context.Context, task *model
 			Status:   model.TaskStatusRunning,
 		}
 		if err := model.TaskCreateTx(s.db.WithContext(ctx), subTask); err != nil {
-			logger.Logger.Warn("创建字幕任务记录失败", zap.Error(err))
+			logger.WithTraceID(ctx).Warn("创建字幕任务记录失败", zap.Error(err))
 		}
 		if err := model.VideoSetTaskStatusTx(s.db.WithContext(ctx), video.ID, model.TaskTypeSubtitle, model.TaskStatusRunning); err != nil {
-			logger.Logger.Warn("同步字幕生成状态失败",
+			logger.WithTraceID(ctx).Warn("同步字幕生成状态失败",
 				zap.String("video_id", video.ID),
 				zap.Error(err),
 			)
@@ -766,14 +769,14 @@ func (s *TaskScheduler) processSubtitleBurnTask(ctx context.Context, task *model
 			// 自动生成字幕失败：将字幕任务标记为 failed
 			if subTask != nil && subTask.ID != "" {
 				if e := model.TaskUpdateFailedTx(s.db.WithContext(ctx), subTask.ID, genErr.Error(), 0); e != nil {
-					logger.Logger.Warn("标记字幕任务失败", zap.Error(e))
+					logger.WithTraceID(ctx).Warn("标记字幕任务失败", zap.Error(e))
 				}
 			}
 			// 回退字幕状态到最新记录
 			if e := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 				return model.VideoResyncTaskStatusTx(tx, video.ID, model.TaskTypeSubtitle)
 			}); e != nil {
-				logger.Logger.Warn("回退字幕生成状态失败",
+				logger.WithTraceID(ctx).Warn("回退字幕生成状态失败",
 					zap.String("video_id", video.ID),
 					zap.Error(e),
 				)
@@ -784,11 +787,11 @@ func (s *TaskScheduler) processSubtitleBurnTask(ctx context.Context, task *model
 		// 字幕生成成功：标记字幕任务为 completed
 		if subTask != nil && subTask.ID != "" {
 			if e := model.TaskUpdateResultTx(s.db.WithContext(ctx), subTask.ID, resultJSON, ""); e != nil {
-				logger.Logger.Warn("标记字幕任务完成失败", zap.Error(e))
+				logger.WithTraceID(ctx).Warn("标记字幕任务完成失败", zap.Error(e))
 			}
 		}
 		if err := model.VideoSetTaskStatusTx(s.db.WithContext(ctx), video.ID, model.TaskTypeSubtitle, model.TaskStatusCompleted); err != nil {
-			logger.Logger.Warn("同步字幕生成状态失败",
+			logger.WithTraceID(ctx).Warn("同步字幕生成状态失败",
 				zap.String("video_id", video.ID),
 				zap.Error(err),
 			)
@@ -816,7 +819,7 @@ func (s *TaskScheduler) processSubtitleBurnTask(ctx context.Context, task *model
 	if overwrite && !canOverwriteSource(sourcePath, outputDir) {
 		// 处理源可能来自旧版输入树位置（历史任务），原地覆盖会把产物写回输入目录：
 		// 降级为在输出目录生成独立产物文件
-		logger.Logger.Warn("处理源不在当前输出目录，跳过覆盖并生成独立产物",
+		logger.WithTraceID(ctx).Warn("处理源不在当前输出目录，跳过覆盖并生成独立产物",
 			zap.String("task_id", task.ID),
 			zap.String("source_path", sourcePath),
 			zap.String("output_dir", outputDir),
@@ -875,13 +878,13 @@ func (s *TaskScheduler) processSubtitleBurnTask(ctx context.Context, task *model
 		}
 		burnPath = sourcePath
 	}
-	logger.Logger.Info("字幕已写入视频",
+	logger.WithTraceID(ctx).Info("字幕已写入视频",
 		zap.String("task_id", task.ID),
 		zap.String("subtitled_video", burnPath),
 	)
 
 	s.markCompleted(ctx, task.ID, "", "字幕写入视频完成")
-	logger.Logger.Info("字幕写入视频任务执行完成",
+	logger.WithTraceID(ctx).Info("字幕写入视频任务执行完成",
 		zap.String("task_id", task.ID),
 		zap.String("srt_file", srtFilePath),
 		zap.String("subtitled_video", burnPath),
@@ -962,7 +965,7 @@ func (s *TaskScheduler) processRepairTask(ctx context.Context, task *model.Task,
 		}
 		lastUpdateAt = now
 		s.updateProgress(ctx, task.ID, progress, lastProgressMsg)
-		logger.Logger.Info("视频去马赛克进度更新",
+		logger.WithTraceID(ctx).Info("视频去马赛克进度更新",
 			zap.String("task_id", task.ID),
 			zap.Int("progress", progress),
 			zap.String("message", lastProgressMsg),
@@ -978,7 +981,7 @@ func (s *TaskScheduler) processRepairTask(ctx context.Context, task *model.Task,
 	// 跳过覆盖，产物保留在输出目录
 	overwrite := task.Overwrite && sourcePath != video.Path
 	if overwrite && !canOverwriteSource(sourcePath, outputDir) {
-		logger.Logger.Warn("处理源不在当前输出目录，跳过覆盖并保留独立产物",
+		logger.WithTraceID(ctx).Warn("处理源不在当前输出目录，跳过覆盖并保留独立产物",
 			zap.String("task_id", task.ID),
 			zap.String("source_path", sourcePath),
 			zap.String("output_dir", outputDir),
@@ -995,14 +998,14 @@ func (s *TaskScheduler) processRepairTask(ctx context.Context, task *model.Task,
 			s.markFailed(ctx, task, fmt.Errorf("替换处理源文件失败: %w", err))
 			return
 		}
-		logger.Logger.Info("已用去马赛克结果覆盖处理源文件",
+		logger.WithTraceID(ctx).Info("已用去马赛克结果覆盖处理源文件",
 			zap.String("task_id", task.ID),
 			zap.String("source_path", sourcePath),
 		)
 	}
 
 	s.markCompleted(ctx, task.ID, output, "视频去马赛克完成")
-	logger.Logger.Info("去马赛克任务执行完成",
+	logger.WithTraceID(ctx).Info("去马赛克任务执行完成",
 		zap.String("task_id", task.ID),
 		zap.String("video_path", video.Path),
 	)
@@ -1086,7 +1089,7 @@ func (s *TaskScheduler) processUpscaleTask(ctx context.Context, task *model.Task
 		}
 		lastUpdateAt = now
 		s.updateProgress(ctx, task.ID, progress, lastProgressMsg)
-		logger.Logger.Info("清晰度修复进度更新",
+		logger.WithTraceID(ctx).Info("清晰度修复进度更新",
 			zap.String("task_id", task.ID),
 			zap.Int("progress", progress),
 			zap.String("message", lastProgressMsg),
@@ -1103,7 +1106,7 @@ func (s *TaskScheduler) processUpscaleTask(ctx context.Context, task *model.Task
 	// 处理源已不在当前输出目录时（历史任务）跳过覆盖，产物保留在输出目录
 	overwrite := task.Overwrite && sourcePath != video.Path
 	if overwrite && !canOverwriteSource(sourcePath, outputDir) {
-		logger.Logger.Warn("处理源不在当前输出目录，跳过覆盖并保留独立产物",
+		logger.WithTraceID(ctx).Warn("处理源不在当前输出目录，跳过覆盖并保留独立产物",
 			zap.String("task_id", task.ID),
 			zap.String("source_path", sourcePath),
 			zap.String("output_dir", outputDir),
@@ -1119,14 +1122,14 @@ func (s *TaskScheduler) processUpscaleTask(ctx context.Context, task *model.Task
 			s.markFailed(ctx, task, fmt.Errorf("替换处理源文件失败: %w", err))
 			return
 		}
-		logger.Logger.Info("已用清晰度修复结果覆盖处理源文件",
+		logger.WithTraceID(ctx).Info("已用清晰度修复结果覆盖处理源文件",
 			zap.String("task_id", task.ID),
 			zap.String("source_path", sourcePath),
 		)
 	}
 
 	s.markCompleted(ctx, task.ID, output, "清晰度修复完成")
-	logger.Logger.Info("清晰度去马赛克任务执行完成",
+	logger.WithTraceID(ctx).Info("清晰度去马赛克任务执行完成",
 		zap.String("task_id", task.ID),
 		zap.String("video_path", video.Path),
 	)
@@ -1187,7 +1190,7 @@ func (s *TaskScheduler) updateProgress(ctx context.Context, taskID string, progr
 	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		return model.TaskUpdateStatusTx(tx, taskID, model.TaskStatusRunning, progress, progressMsg)
 	}); err != nil {
-		logger.Logger.Error("更新任务进度失败",
+		logger.WithTraceID(ctx).Error("更新任务进度失败",
 			zap.String("task_id", taskID),
 			zap.Int("progress", progress),
 			zap.Error(err),
@@ -1199,7 +1202,7 @@ func (s *TaskScheduler) updateProgress(ctx context.Context, taskID string, progr
 func (s *TaskScheduler) markCompleted(ctx context.Context, taskID string, resultJSON string, progressMsg string) {
 	// 用户已请求取消时，落定为 cancelled 而非 completed，避免取消与完成的竞态
 	if s.isCancelling(context.WithoutCancel(ctx), taskID) {
-		logger.Logger.Info("任务完成前已被请求取消", zap.String("task_id", taskID))
+		logger.WithTraceID(ctx).Info("任务完成前已被请求取消", zap.String("task_id", taskID))
 		s.markCancelled(ctx, &model.Task{BaseModel: model.BaseModel{ID: taskID}}, "")
 		return
 	}
@@ -1213,7 +1216,7 @@ func (s *TaskScheduler) markCompleted(ctx context.Context, taskID string, result
 		}
 		return model.TaskUpdateResultTx(tx, taskID, resultJSON, progressMsg)
 	}); err != nil {
-		logger.Logger.Error("标记任务完成失败",
+		logger.WithTraceID(ctx).Error("标记任务完成失败",
 			zap.String("task_id", taskID),
 			zap.Error(err),
 		)
@@ -1224,7 +1227,7 @@ func (s *TaskScheduler) markCompleted(ctx context.Context, taskID string, result
 func (s *TaskScheduler) markFailed(ctx context.Context, task *model.Task, err error) {
 	// 用户已请求取消时，落定为 cancelled 而非 failed
 	if s.isCancelling(context.WithoutCancel(ctx), task.ID) {
-		logger.Logger.Info("已执行任务被请求取消，落定为已取消",
+		logger.WithTraceID(ctx).Info("已执行任务被请求取消，落定为已取消",
 			zap.String("task_id", task.ID),
 			zap.String("task_type", task.TaskType),
 			zap.Error(err),
@@ -1233,7 +1236,7 @@ func (s *TaskScheduler) markFailed(ctx context.Context, task *model.Task, err er
 		return
 	}
 
-	logger.Logger.Error("任务执行失败",
+	logger.WithTraceID(ctx).Error("任务执行失败",
 		zap.String("task_id", task.ID),
 		zap.String("task_type", task.TaskType),
 		zap.Error(err),
@@ -1244,7 +1247,7 @@ func (s *TaskScheduler) markFailed(ctx context.Context, task *model.Task, err er
 		}
 		return model.TaskUpdateFailedTx(tx, task.ID, err.Error(), task.RetryCount+1)
 	}); e != nil {
-		logger.Logger.Error("标记任务失败状态失败",
+		logger.WithTraceID(ctx).Error("标记任务失败状态失败",
 			zap.String("task_id", task.ID),
 			zap.Error(e),
 		)
@@ -1256,7 +1259,7 @@ func (s *TaskScheduler) markCancelled(ctx context.Context, task *model.Task, msg
 	if msg == "" {
 		msg = "用户已取消"
 	}
-	logger.Logger.Info("任务已取消",
+	logger.WithTraceID(ctx).Info("任务已取消",
 		zap.String("task_id", task.ID),
 		zap.String("task_type", task.TaskType),
 	)
@@ -1275,7 +1278,7 @@ func (s *TaskScheduler) markCancelled(ctx context.Context, task *model.Task, msg
 		}
 		return model.TaskUpdateCancelledTx(tx, task.ID, msg)
 	}); e != nil {
-		logger.Logger.Error("标记任务取消状态失败",
+		logger.WithTraceID(ctx).Error("标记任务取消状态失败",
 			zap.String("task_id", task.ID),
 			zap.Error(e),
 		)
