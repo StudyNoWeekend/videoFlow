@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -15,7 +16,7 @@ func initVideoStatusDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	if err := db.AutoMigrate(&Video{}, &Task{}); err != nil {
+	if err := db.AutoMigrate(&Video{}, &Task{}, &Setting{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	DB = db
@@ -169,4 +170,149 @@ func videoByID(t *testing.T, id string) *Video {
 		t.Fatalf("query video: %v", err)
 	}
 	return &v
+}
+
+// initArtifactStatusDB 初始化产物探测测试环境：迁移 Video/Task/Setting 并把
+// output_dir 指向独立临时目录，返回该目录
+func initArtifactStatusDB(t *testing.T) string {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "video_artifact.db")), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.AutoMigrate(&Video{}, &Task{}, &Setting{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	DB = db
+	outputDir := t.TempDir()
+	if err := SettingSet(context.Background(), SettingKeyOutputDir, outputDir); err != nil {
+		t.Fatal(err)
+	}
+	return outputDir
+}
+
+func touchFile(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestVideoArtifactStatuses(t *testing.T) {
+	outputDir := initArtifactStatusDB(t)
+	inputDir := t.TempDir()
+	v := mkVideo(t, filepath.Join(inputDir, "movie.mp4"))
+	outDir := filepath.Join(outputDir, "movie")
+
+	// 无任何产物：全部为 false
+	for taskType, exists := range VideoArtifactStatuses(v) {
+		if exists {
+			t.Fatalf("%s should be false without artifacts", taskType)
+		}
+	}
+
+	// 与本底同名的文件不算产物（fixed_ 开头若不跳过会误判为去马赛克产物）
+	touchFile(t, filepath.Join(outDir, "movie.mp4"))
+	if statuses := VideoArtifactStatuses(v); statuses[TaskTypeDeblur] || statuses[TaskTypeUpscale] || statuses[TaskTypeSubtitleBurn] {
+		t.Fatal("same-name file must not be counted as artifact")
+	}
+
+	touchFile(t, filepath.Join(outDir, "movie.srt"))
+	touchFile(t, filepath.Join(outDir, "movie_subtitled_123.mp4"))
+	touchFile(t, filepath.Join(outDir, "movie_upscaled_720p.mp4"))
+	touchFile(t, filepath.Join(outDir, "movie_fixed_1.mp4"))
+
+	statuses := VideoArtifactStatuses(v)
+	if !statuses[TaskTypeSubtitle] {
+		t.Fatal("subtitle artifact not detected")
+	}
+	if !statuses[TaskTypeSubtitleBurn] {
+		t.Fatal("subtitle burn artifact (timestamped variant) not detected")
+	}
+	if !statuses[TaskTypeUpscale] {
+		t.Fatal("upscale artifact not detected")
+	}
+	if !statuses[TaskTypeDeblur] {
+		t.Fatal("deblur artifact (fixed_ prefix) not detected")
+	}
+}
+
+func resyncWithArtifact(t *testing.T, videoID, taskType string) {
+	t.Helper()
+	if err := DB.Transaction(func(tx *gorm.DB) error {
+		return VideoResyncTaskStatusWithArtifactTx(tx, videoID, taskType)
+	}); err != nil {
+		t.Fatalf("resync with artifact: %v", err)
+	}
+}
+
+func TestVideoResyncTaskStatusWithArtifactTx(t *testing.T) {
+	outputDir := initArtifactStatusDB(t)
+	inputDir := t.TempDir()
+
+	// 无任务记录、产物存在 → 兜底为 completed
+	va := mkVideo(t, filepath.Join(inputDir, "a.mp4"))
+	touchFile(t, filepath.Join(outputDir, "a", "a.srt"))
+	resyncWithArtifact(t, va.ID, TaskTypeSubtitle)
+	if got := videoByID(t, va.ID).SubtitleStatus; got != TaskStatusCompleted {
+		t.Fatalf("artifact fallback = %s, want completed", got)
+	}
+
+	// 无任务记录、无产物 → 清空
+	vb := mkVideo(t, filepath.Join(inputDir, "b.mp4"))
+	DB.Transaction(func(tx *gorm.DB) error {
+		return VideoSetTaskStatusTx(tx, vb.ID, TaskTypeSubtitle, TaskStatusRunning)
+	})
+	resyncWithArtifact(t, vb.ID, TaskTypeSubtitle)
+	if got := videoByID(t, vb.ID).SubtitleStatus; got != "" {
+		t.Fatalf("no record no artifact = %s, want empty", got)
+	}
+
+	// 任务记录存在（pending）+ 产物存在 → 记录优先
+	mkTaskAt(t, va.ID, TaskTypeSubtitle, TaskStatusPending, 1000)
+	resyncWithArtifact(t, va.ID, TaskTypeSubtitle)
+	if got := videoByID(t, va.ID).SubtitleStatus; got != TaskStatusPending {
+		t.Fatalf("record wins = %s, want pending", got)
+	}
+}
+
+func TestVideoResyncAllTaskStatusArtifactFallback(t *testing.T) {
+	outputDir := initArtifactStatusDB(t)
+	inputDir := t.TempDir()
+
+	// a：产物存在、无记录 → 兜底 completed；b：有 failed 记录 + 产物 → 保持 failed；c：无产物 → 空
+	a := mkVideo(t, filepath.Join(inputDir, "a.mp4"))
+	b := mkVideo(t, filepath.Join(inputDir, "b.mp4"))
+	c := mkVideo(t, filepath.Join(inputDir, "c.mp4"))
+	touchFile(t, filepath.Join(outputDir, "a", "a.srt"))
+	touchFile(t, filepath.Join(outputDir, "b", "b.srt"))
+	mkTask(t, b.ID, TaskTypeSubtitle, TaskStatusFailed)
+
+	if err := VideoResyncAllTaskStatus(context.Background()); err != nil {
+		t.Fatalf("resync all: %v", err)
+	}
+
+	if got := videoByID(t, a.ID).SubtitleStatus; got != TaskStatusCompleted {
+		t.Fatalf("a subtitle_status = %s, want completed (artifact fallback)", got)
+	}
+	if got := videoByID(t, b.ID).SubtitleStatus; got != TaskStatusFailed {
+		t.Fatalf("b subtitle_status = %s, want failed (record wins)", got)
+	}
+	if got := videoByID(t, c.ID).SubtitleStatus; got != "" {
+		t.Fatalf("c subtitle_status = %s, want empty", got)
+	}
+
+	// 删除产物后再回填 → 清空
+	if err := os.Remove(filepath.Join(outputDir, "a", "a.srt")); err != nil {
+		t.Fatal(err)
+	}
+	if err := VideoResyncAllTaskStatus(context.Background()); err != nil {
+		t.Fatalf("resync all after artifact removed: %v", err)
+	}
+	if got := videoByID(t, a.ID).SubtitleStatus; got != "" {
+		t.Fatalf("a subtitle_status after artifact removed = %s, want empty", got)
+	}
 }

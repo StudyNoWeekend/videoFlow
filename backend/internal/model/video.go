@@ -295,9 +295,60 @@ func VideoResyncTaskStatusTx(tx *gorm.DB, videoID, taskType string) error {
 // resyncTaskTypes 视频状态全量回填覆盖的任务类型
 var resyncTaskTypes = []string{TaskTypeSubtitle, TaskTypeSubtitleBurn, TaskTypeDeblur, TaskTypeUpscale}
 
-// VideoResyncAllTaskStatus 全量把 videos 表各任务状态字段与最新任务记录对齐。
+// VideoResyncTaskStatusWithArtifactTx 在事务中把视频指定任务类型的状态字段与最新任务记录对齐；
+// 查不到任务记录时探测输出目录兜底：产物仍存在则视为已完成（completed），
+// 否则清空字段。用于取消排队任务等记录缺失但产物可能仍在的场景。
+// 注意：产物文件将在事务提交后才被删除的路径（如 DeleteTask deleteFiles=true）
+// 不能用它，事务内文件尚未删除，探测会误判。
+func VideoResyncTaskStatusWithArtifactTx(tx *gorm.DB, videoID, taskType string) error {
+	column := VideoTaskStatusColumn(taskType)
+	if column == "" || videoID == "" {
+		return nil
+	}
+	var status string
+	if err := tx.Model(&Task{}).
+		Where("video_id = ? AND task_type = ?", videoID, taskType).
+		Order("created_at DESC, id DESC").
+		Limit(1).
+		Pluck("status", &status).Error; err != nil {
+		return err
+	}
+	if status == "" {
+		var v Video
+		if err := tx.Select("id", "path", "name").Where("id = ?", videoID).First(&v).Error; err != nil {
+			if err == gorm.ErrRecordNotFound {
+				return nil
+			}
+			return err
+		}
+		if VideoArtifactStatuses(&v)[taskType] {
+			status = TaskStatusCompleted
+		}
+	}
+	return tx.Model(&Video{}).Where("id = ?", videoID).Update(column, status).Error
+}
+
+// taskStatusFieldValue 读取 Video 结构体上指定任务类型对应的状态字段值
+func taskStatusFieldValue(v *Video, taskType string) string {
+	switch taskType {
+	case TaskTypeSubtitle:
+		return v.SubtitleStatus
+	case TaskTypeSubtitleBurn:
+		return v.SubtitleBurnStatus
+	case TaskTypeDeblur, TaskTypeRepair:
+		return v.DeblurStatus
+	case TaskTypeUpscale:
+		return v.UpscaleStatus
+	}
+	return ""
+}
+
+// VideoResyncAllTaskStatus 全量把 videos 表各任务状态字段与最新任务记录对齐：
+// 第一阶段按最新任务记录写入，无任务记录则清空字段；
+// 第二阶段对仍为空的字段探测输出目录兜底，产物仍存在则视为已完成（completed）。
 // 用于启动时回填历史数据，以及调度器停摆（running 批量置失败）后的一致性修复。
 func VideoResyncAllTaskStatus(ctx context.Context) error {
+	// 第一阶段：与最新任务记录对齐（纯 SQL）
 	for _, taskType := range resyncTaskTypes {
 		column := VideoTaskStatusColumn(taskType)
 		stmt := fmt.Sprintf(
@@ -306,6 +357,30 @@ func VideoResyncAllTaskStatus(ctx context.Context) error {
 		)
 		if err := DB.WithContext(ctx).Exec(stmt, taskType).Error; err != nil {
 			return fmt.Errorf("回填视频 %s 状态失败: %w", taskType, err)
+		}
+	}
+
+	// 第二阶段：记录缺失的类型探测产物文件兜底，只补空字段、绝不降级已有状态
+	var videos []*Video
+	if err := DB.WithContext(ctx).
+		Select("id", "path", "name", "subtitle_status", "subtitle_burn_status", "deblur_status", "upscale_status").
+		Where("subtitle_status = ? OR subtitle_burn_status = ? OR deblur_status = ? OR upscale_status = ?", "", "", "", "").
+		Find(&videos).Error; err != nil {
+		return fmt.Errorf("查询待回填视频失败: %w", err)
+	}
+	for _, v := range videos {
+		artifactStatuses := VideoArtifactStatuses(v)
+		updates := map[string]interface{}{}
+		for _, taskType := range resyncTaskTypes {
+			if taskStatusFieldValue(v, taskType) == "" && artifactStatuses[taskType] {
+				updates[VideoTaskStatusColumn(taskType)] = TaskStatusCompleted
+			}
+		}
+		if len(updates) == 0 {
+			continue
+		}
+		if err := DB.WithContext(ctx).Model(&Video{}).Where("id = ?", v.ID).Updates(updates).Error; err != nil {
+			return fmt.Errorf("回填视频 %s 产物状态失败: %w", v.ID, err)
 		}
 	}
 	return nil

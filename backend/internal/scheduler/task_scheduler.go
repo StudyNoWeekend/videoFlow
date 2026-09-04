@@ -429,9 +429,10 @@ func (s *TaskScheduler) CancelByID(ctx context.Context, taskID string) error {
 		// 使用 Resync 而非直接 Set cancelled：同类型可能有多个 pending 排队中，
 		// 取消的不是最旧一条时，视频字段应回退到更早的任务状态（或清空），
 		// 避免非最新 pending 取消后错误显示为 cancelled。
+		// 记录全被删光时用产物探测兜底：产物仍在则回退为 completed 而非清空。
 		var t model.Task
 		if err := s.db.WithContext(dbCtx).Select("video_id", "task_type").Where("id = ?", taskID).First(&t).Error; err == nil {
-			if err := model.VideoResyncTaskStatusTx(s.db.WithContext(dbCtx), t.VideoID, t.TaskType); err != nil {
+			if err := model.VideoResyncTaskStatusWithArtifactTx(s.db.WithContext(dbCtx), t.VideoID, t.TaskType); err != nil {
 				logger.WithTraceID(ctx).Error("同步视频任务状态失败", zap.String("task_id", taskID), zap.Error(err))
 			}
 		}

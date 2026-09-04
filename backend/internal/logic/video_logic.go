@@ -430,38 +430,5 @@ func (l *VideoLogic) DirFiles(ctx context.Context, videoID string) ([]*DirFileIn
 
 // classifyOutputFile 根据文件名和视频原名判断输出文件的类型
 func classifyOutputFile(fileName, videoBaseName string) string {
-	name := strings.ToLower(fileName)
-	ext := filepath.Ext(name)
-	base := strings.TrimSuffix(name, ext)
-
-	// 字幕文件：<video>.srt
-	if ext == ".srt" && base == strings.ToLower(videoBaseName) {
-		return "subtitle"
-	}
-
-	// 清晰度修复输出视频：含 _upscaled_ 特征，优先级高于 repaired 避免链式文件误分类
-	if model.IsVideoFile(fileName) && (strings.Contains(base, "_upscaled")) {
-		return "upscaled_video"
-	}
-
-	// 字幕合成视频：<video>_subtitled.<ext> 或 <video>_subtitled_<nonce>.<ext>
-	if model.IsVideoFile(fileName) && strings.Contains(base, "_subtitled") {
-		return "subtitled_video"
-	}
-
-	// 去马赛克输出视频：含 repaired / denoised / restored / enhanced / deblurred / deblur 等特征
-	if model.IsVideoFile(fileName) {
-		if strings.Contains(base, "repaired") ||
-			strings.Contains(base, "denoised") ||
-			strings.Contains(base, "restored") ||
-			strings.Contains(base, "enhanced") ||
-			strings.Contains(base, "deblurred") ||
-			strings.Contains(base, "deblur") ||
-			strings.HasPrefix(base, "repaired_") ||
-			strings.HasPrefix(base, "fixed_") {
-			return "repaired_video"
-		}
-	}
-
-	return "unknown"
+	return model.ClassifyArtifactName(fileName, videoBaseName)
 }
