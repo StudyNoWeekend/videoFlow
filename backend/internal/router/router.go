@@ -49,6 +49,7 @@ func SetupRouter(cfg *bootstrap.AppConfigHTTP) *gin.Engine {
 		RegisterSettingRouter(api)
 		RegisterComponentRouter(api)
 		RegisterDownloadRouter(api)
+		RegisterTelegramRouter(api)
 	}
 
 	// 兜底 404

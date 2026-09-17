@@ -3,10 +3,15 @@ import request, { type ApiResponse } from './request'
 // 下载任务状态
 export type DownloadStatus = 'pending' | 'probing' | 'downloading' | 'completed' | 'failed' | 'cancelled'
 
+// 下载平台：telegram 为内置 MTProto 客户端，yt-dlp 为通用站点下载器。
+// 空串是升级前历史记录的取值，前端按 yt-dlp 处理。
+export type DownloadPlatform = 'telegram' | 'yt-dlp' | ''
+
 // 下载任务信息
 export interface Download {
   id: string
   url: string
+  platform: DownloadPlatform
   status: DownloadStatus
   progress: number
   progress_msg?: string

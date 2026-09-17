@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"video-captions/internal/model"
+	"video-captions/internal/telegram"
 	"video-captions/internal/utils"
 )
 
@@ -28,7 +29,7 @@ func NewDetector() *Detector {
 
 // DetectAll 检测所有组件
 func (d *Detector) DetectAll(ctx context.Context) []ComponentInfo {
-	results := make([]ComponentInfo, 0, 6)
+	results := make([]ComponentInfo, 0, 7)
 
 	results = append(results, d.detectDocker(ctx))
 	results = append(results, d.detectFFmpeg(ctx))
@@ -36,6 +37,7 @@ func (d *Detector) DetectAll(ctx context.Context) []ComponentInfo {
 	results = append(results, d.detectLada(ctx))
 	results = append(results, d.detectVideo2X(ctx))
 	results = append(results, d.detectYtDlp(ctx))
+	results = append(results, d.detectTelegram(ctx))
 
 	d.mu.Lock()
 	d.cached = results
@@ -67,6 +69,8 @@ func (d *Detector) GetComponentStatus(ctx context.Context, componentType Compone
 		return d.detectVideo2X(ctx)
 	case ComponentYtDlp:
 		return d.detectYtDlp(ctx)
+	case ComponentTelegram:
+		return d.detectTelegram(ctx)
 	default:
 		return ComponentInfo{
 			Type:     componentType,
@@ -232,6 +236,39 @@ func (d *Detector) detectYtDlp(ctx context.Context) ComponentInfo {
 	}
 	info.Version = strings.TrimSpace(version)
 	info.Status = StatusInstalled
+	return info
+}
+
+// detectTelegram 检测内置 Telegram 客户端状态：未配置凭据、未登录均视为未就绪
+func (d *Detector) detectTelegram(_ context.Context) ComponentInfo {
+	info := ComponentInfo{
+		Type:        ComponentTelegram,
+		Name:        "Telegram",
+		Description: "Built-in MTProto client for downloading videos from t.me links",
+		NeedsDocker: false,
+	}
+
+	engine := telegram.Global()
+	if engine == nil || !engine.Configured() {
+		info.Status = StatusMissing
+		info.ErrorMsg = "未配置 api_id/api_hash"
+		return info
+	}
+
+	if !engine.IsReady() {
+		info.Status = StatusError
+		info.ErrorMsg = "连接未就绪，请检查网络或代理配置"
+		return info
+	}
+
+	if !engine.IsAuthenticated() {
+		info.Status = StatusMissing
+		info.ErrorMsg = "未登录，请在下载页扫码登录"
+		return info
+	}
+
+	info.Status = StatusInstalled
+	info.Version = engine.Account()
 	return info
 }
 

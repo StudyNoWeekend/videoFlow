@@ -66,6 +66,7 @@
 
 - **输入 / 输出目录分离** - 扫描输入目录自动入库；任务产物（字幕 / 烧录视频 / 去马赛克 / 清晰度修复视频）统一输出到可配置的输出目录，任务状态以视频记录的状态字段为准、由任务生命周期实时同步
 - **视频下载** - 基于 yt-dlp 内置下载管理，支持 YouTube / Bilibili / Twitter / Instagram / TikTok / Facebook / Twitch / Vimeo / Niconico / Dailymotion / Reddit / Tumblr 等主流平台，URL 提交即下，进度实时跟踪，下载完成自动入库到视频列表
+- **Telegram 下载** - 内置 MTProto 客户端，粘贴 `t.me` 消息链接自动识别并改走 Telegram 通道，支持公开频道、私有频道（`t.me/c/`）、话题与评论区链接；网页端扫码登录，无需额外安装命令行工具
 - **字幕生成** - 基于 Whisper ASR，支持语言、VAD 过滤、任务类型、音频预编码、初始提示词、词级时间戳、多种输出格式（json / srt / vtt / txt / tsv）
 - **字幕烧录** - 将生成的字幕永久写入视频画面（硬编码），支持三级字幕查找（已完成记录 → 输出目录 SRT 文件 → 自动生成），自动生成的侧边字幕任务记录重启后保留
 - **去马赛克** - 基于 Docker 镜像 `ladaapp/lada`，支持 x86_64 CPU 以及 NVIDIA CUDA 显卡（Turing 系列或更高版本，包括 RTX 20xx 到 RTX 50xx 系列），CUDA 设备自动透传（`--gpus`）、GPU 故障原因自动提示；支持选择派生视频作为处理源 + 覆写模式
@@ -75,7 +76,7 @@
 - **用户认证** - 首次启动引导初始化管理员账号，登录 / 修改密码 / 密码重置，业务 API 全部走 JWT 鉴权
 - **运行时配置** - 统一配置页，所有配置在线修改并持久化（SQLite），保存即热生效；配置项覆盖 ASR / 去马赛克 / 清晰度增强 / 各类型并发数 / 轮询间隔
 - **FFmpeg 智能调用** - 自动探测本地 ffmpeg，无需手动配置
-- **组件管理** - Docker / FFmpeg / Whisper ASR / Lada / Video2X / yt-dlp 六大组件状态检测与安装引导，安装进度 SSE 实时推送，安装历史可追溯
+- **组件管理** - Docker / FFmpeg / Whisper ASR / Lada / Video2X / yt-dlp / Telegram 组件状态检测与安装引导，安装进度 SSE 实时推送，安装历史可追溯
 - **暗色 / 亮色主题** - 一键切换，Element Plus 组件样式同步适配
 - **国际化** - 内置简体中文 / 繁體中文 / English / 日本語 四语言支持，运行时即时切换
 - **响应式布局** - 桌面端全功能表格视图、平板端折叠侧栏、移动端（<480px）紧凑卡片布局，所有核心页面自适应
@@ -220,6 +221,7 @@ APP_HTTP_PORT=9090 go run ./cmd/api   # 后端
 | 去马赛克 | [`ladaapp/lada`](https://github.com/ladaapp/lada) | Docker 去马赛克引擎 |
 | 清晰度增强 | [Video2X](https://github.com/k4yt3x/video2x) | Docker 清晰度增强引擎 |
 | 视频下载 | [yt-dlp](https://github.com/yt-dlp/yt-dlp) | 在线视频下载引擎 |
+| Telegram 下载 | [iyear/tdl](https://github.com/iyear/tdl) core 模块（基于 [gotd/td](https://github.com/gotd/td)） | MTProto 客户端 / DC 连接池 / 多线程下载引擎，无需外部二进制 |
 | 前端 | [Vue 3](https://vuejs.org/) + [Element Plus](https://element-plus.org/) + [Vite](https://vite.dev/) | 图形界面 |
 | 状态管理 | [Pinia](https://pinia.vuejs.org/) | 前端状态 |
 | HTTP 客户端 | [Axios](https://axios-http.com/) | 接口请求 |
@@ -273,6 +275,16 @@ asr:
 	  subtitle_burn: 1
 	  repair: 1
 	  upscale: 1
+	proxy:
+	  url: ""                         # 全局出站代理，Telegram 与 yt-dlp 共用；留空直连
+	  use_for_ytdlp: true             # yt-dlp 是否走代理（代理为全局模式时可关掉，避免国内站点绕远）
+	telegram:
+	  app_id: 0                       # 到 my.telegram.org 申请，留空则停用 Telegram 下载
+	  app_hash: ""
+	  data_dir: data/telegram         # 会话目录（含授权密钥，等同账号凭据）
+	  threads: 4                      # 单文件分片下载并发数
+	  pool_size: 4                    # 每个 DC 的连接池大小
+	  reconnect_timeout: 300          # 重连退避上限（秒）
 	download:
 	  concurrency: 3
 	scheduler:
@@ -408,6 +420,23 @@ viper 前缀 `APP_`，配置键 `.` -> `_`，故 `http.port` 对应环境变量 
 
 下载完成后自动通过 `VideoUpsertByPath` 将文件注册到视频列表。
 
+创建任务时会自动识别平台并记录在 `platform` 字段：`t.me` 链接（含 `telegram.me` / `telegram.dog` / `tx.me` / `tg://`）走 `telegram`，其余走 `yt-dlp`。两种平台共用同一套状态机、进度展示、取消与入库流程，仅探测与下载的执行方式不同。
+
+</details>
+
+<details>
+<summary><b>Telegram 接口</b></summary>
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/v1/telegram/status` | 查询连接与登录状态（`configured` / `ready` / `authenticated` / `account` / `login_status`） |
+| `POST` | `/api/v1/telegram/login/qr` | 发起扫码登录（幂等，已在登录流程中时直接返回当前状态） |
+| `GET` | `/api/v1/telegram/login/qr` | 获取当前登录二维码图片（服务端渲染的 PNG data URI） |
+| `POST` | `/api/v1/telegram/login/2fa` | 提交两步验证密码（body 传 `password`） |
+| `POST` | `/api/v1/telegram/logout` | 退出登录并清理本地会话 |
+
+登录状态：`""`（空闲）/ `pending`（等待扫码）/ `need_2fa`（等待两步验证密码）/ `success`（登录成功）/ `error`（登录失败）
+
 </details>
 
 <details>
@@ -475,6 +504,7 @@ viper 前缀 `APP_`，配置键 `.` -> `_`，故 `http.port` 对应环境变量 
 - **首次使用需初始化**：浏览器首次访问会引导初始化管理员账号，登录后才能使用业务功能
 - **ASR 服务需自备**：请自行部署 [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice)，并配置 `asr.url`
 - **数据库持久化**：默认 `data/app.db`，Docker 部署时务必挂载 `/app/data` 目录，否则重启丢数据
+- **Telegram 会话文件等同账号凭据**：登录后授权密钥保存在 `data/telegram/session.json`（0600 权限），拿到该文件即可操作对应 Telegram 账号，请勿提交到版本库或对外共享；`backend/data/` 与 Docker 部署用的根目录 `data/` 均已在 `.gitignore` 中忽略
 
 ## ❓ FAQ
 
@@ -513,6 +543,60 @@ viper 前缀 `APP_`，配置键 `.` -> `_`，故 `http.port` 对应环境变量 
 
 </details>
 
+<details>
+<summary><b>Telegram 下载怎么开启？</b></summary>
+
+三步：
+
+1. 到 [my.telegram.org](https://my.telegram.org) → API development tools 申请 `api_id` 与 `api_hash`
+2. 在「系统配置 → Telegram 下载」中填入 api_id / api_hash；国内网络还需在**「出站代理」**区块填写代理（如 `socks5://127.0.0.1:1080`），保存
+3. 回到「视频下载」页，粘贴任意 `t.me` 链接，会弹出二维码；用手机 Telegram 扫码即可登录（账号开启了两步验证时会再要求输入密码）
+
+登录状态持久化在 `data/telegram/`（Docker 部署已由 `./data:/app/data` 覆盖，无需额外挂载），重启后无需重新扫码。
+
+</details>
+
+<details>
+<summary><b>Telegram 下载失败 / 提示未登录？</b></summary>
+
+- **提示未登录**：登录会话可能已在服务端失效（例如在「设备管理」里踢掉了该会话），重新扫码即可
+- **一直连不上**：Telegram 在部分地区需要代理，请在设置中配置 `socks5://` 或 `http://` 代理地址；代理本身不可用时会一直重连
+- **提示「未找到频道」**：`t.me/c/<id>/<msg>` 这类私有频道链接需要当前登录账号**已加入该频道**，否则无法解析
+- **提示「仅支持下载视频类媒体」**：消息里的图片、音频、普通文档不会下载，仅支持视频 / 动图 / 视频类文档
+- **提示无权访问**：频道可能禁止转发或保存内容，或账号未加入
+
+</details>
+
+<details>
+<summary><b>使用 Telegram 下载有账号风险吗？</b></summary>
+
+本项目通过社区实现的开源 MTProto 库（gotd/td）以**用户账号**（非 Bot）登录，这是下载受限频道内容所必需的——官方 Bot API 做不到。请注意：
+
+- 使用非官方客户端登录存在被 Telegram 风控的可能，建议**使用自己的 api_id/api_hash**，不要与他人共用
+- 不要把 `threads`（分片并发）调得过高，也不要同时发起大量下载
+- 避免同一账号在过多设备上同时登录
+- `data/telegram/session.json` 包含账号授权密钥，**等同于账号凭据**，请勿提交到版本库或对外共享
+
+</details>
+
+<details>
+<summary><b>出站代理哪些功能会走？哪些不走？</b></summary>
+
+「系统配置 → 出站代理」是应用级的全局代理，支持 `socks5://`、`socks5h://`、`http://`、`https://`：
+
+| 功能 | 是否走代理 |
+| --- | --- |
+| Telegram 登录与下载 | 是（始终使用） |
+| yt-dlp 视频下载 | 是，可用「yt-dlp 使用代理」开关单独关闭 |
+| ASR 语音识别服务 | **否**。ASR 通常是内网或国内服务，走代理反而会连不上 |
+| Docker 拉取镜像（Lada / Video2X） | **否**。由 Docker daemon 自己发起，需在 Docker 的代理配置中设置 |
+| 组件安装（brew / apt / winget 等） | **否**。由系统包管理器发起，需在系统层配置 |
+| SSH 远程 ffmpeg | **否**。走 SSH 连接，与 HTTP 代理无关 |
+
+如果你的代理是「全局模式」（所有流量都走代理），下载 B 站等国内站点会绕到国外、明显变慢，此时把「yt-dlp 使用代理」关掉即可让它直连；若代理本身是规则模式（国内直连、国外走代理，如 Clash 默认配置），保持开启即可。
+
+</details>
+
 ## 🗺️ Roadmap
 
 **✅ 已实现**
@@ -543,6 +627,8 @@ viper 前缀 `APP_`，配置键 `.` -> `_`，故 `http.port` 对应环境变量 
 - **[ladaapp/lada](https://github.com/ladaapp/lada)** - 去马赛克 Docker 镜像。
 - **[Video2X](https://github.com/k4yt3x/video2x)** - 视频清晰度增强 Docker 镜像。
 - **[yt-dlp](https://github.com/yt-dlp/yt-dlp)** - 功能强大的视频下载引擎，支持数百个视频网站。
+- **[gotd/td](https://github.com/gotd/td)** - 纯 Go 实现的 Telegram MTProto 协议库。
+- **[iyear/tdl](https://github.com/iyear/tdl)** - Telegram 下载工具，VideoFlow 复用其 core 模块的客户端封装（tclient）、DC 连接池（dcpool）、媒体解析（tmedia）、链接工具（tutil）与多线程下载引擎（downloader）。**注意：core 模块采用 AGPL-3.0 许可，因此本项目对外分发时需遵循 AGPL-3.0，详见下方协议说明。**
 - **[Gin](https://github.com/gin-gonic/gin)** / **[GORM](https://github.com/go-gorm/gorm)** / **[Viper](https://github.com/spf13/viper)** / **[Zap](https://github.com/uber-go/zap)** - 优秀的 Go 基础库。
 - **[Vue 3](https://vuejs.org/)** / **[Element Plus](https://element-plus.org/)** / **[Vite](https://vite.dev/)** - 前端基石。
 
@@ -552,7 +638,9 @@ viper 前缀 `APP_`，配置键 `.` -> `_`，故 `http.port` 对应环境变量 
 
 ## 📜 协议
 
-[MIT License](./LICENSE) - 自由使用、修改、分发，只需保留版权声明。
+本项目代码以 [MIT License](./LICENSE) 发布。
+
+⚠️ **注意**：Telegram 下载功能依赖的 [iyear/tdl](https://github.com/iyear/tdl) core 模块采用 **AGPL-3.0** 许可。根据 AGPL 的传染性条款，分发包含该功能的本程序（或以网络服务形式对外提供）时，需要遵循 AGPL-3.0 并向用户提供对应源码。如需规避，可移除 `internal/telegram` 模块及其依赖，其余功能不受影响。
 
 ---
 

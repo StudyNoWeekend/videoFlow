@@ -238,6 +238,16 @@ repair:
 concurrency:
   subtitle: 2
   repair: 1
+proxy:
+  url: ""                         # Global outbound proxy, shared by Telegram and yt-dlp; empty = direct
+  use_for_ytdlp: true             # Whether yt-dlp uses it (turn off if your proxy is in global mode)
+telegram:
+  app_id: 0                       # Register at my.telegram.org; leave empty to disable Telegram downloads
+  app_hash: ""
+  data_dir: data/telegram         # Session dir (holds the auth key, equivalent to your credentials)
+  threads: 4                      # Per-file download threads
+  pool_size: 4                    # Connection pool size per DC
+  reconnect_timeout: 300          # Reconnect backoff cap (seconds)
 ```
 
 </details>
@@ -444,6 +454,22 @@ Defaults to `data/app.db` (SQLite). When deploying with Docker, mount the `/app/
 
 </details>
 
+<details>
+<summary><b>Telegram downloads</b></summary>
+
+Paste any `t.me` message link on the Downloads page and it is routed to the built-in MTProto client instead of yt-dlp (public channels, private `t.me/c/` links, topic and comment links are supported).
+
+To enable it:
+
+1. Register `api_id` / `api_hash` at [my.telegram.org](https://my.telegram.org) -> API development tools
+2. Fill them in under Settings -> Telegram Download; if Telegram is blocked in your region, also set a proxy (e.g. `socks5://127.0.0.1:1080`) in the **Outbound Proxy** section and save
+3. Paste a `t.me` link; a QR code appears — scan it with your Telegram mobile app (2FA password is requested if enabled)
+
+The login session is persisted under `data/telegram/` and survives restarts.
+
+**Account risk**: this logs in as a *user account* (not a bot), which is required to download restricted channels. Use your own api_id/api_hash, keep `threads` moderate, and avoid signing in on too many devices. `data/telegram/session.json` holds the account authorization key — treat it as a credential and never commit it.
+
+</details>
 ## 🗺️ Roadmap
 
 **✅ Implemented**
@@ -476,7 +502,9 @@ This project stands on the shoulders of giants. Special thanks to the following 
 
 ## 📜 License
 
-[MIT License](./LICENSE) - Free to use, modify, and distribute, just keep the copyright notice.
+This project's own code is released under the [MIT License](./LICENSE).
+
+⚠️ **Note**: the Telegram download feature depends on the core module of [iyear/tdl](https://github.com/iyear/tdl), which is licensed under **AGPL-3.0**. Due to AGPL's copyleft terms, distributing this program with that feature included (or offering it as a network service) requires complying with AGPL-3.0 and providing the corresponding source code. To avoid this, remove the `internal/telegram` module and its dependency; all other features are unaffected.
 
 ---
 

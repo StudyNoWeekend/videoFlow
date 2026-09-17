@@ -1,5 +1,10 @@
+# 基础镜像仓库前缀。默认走华为云镜像源（国内构建更快），但该源仅提供 amd64；
+# Apple Silicon 等 arm64 机器可用 --build-arg BASE_REGISTRY=docker.io/library 切到官方多架构镜像，
+# 避免整个镜像在 QEMU 模拟下运行（ffmpeg 等 CPU 密集操作会明显变慢）。
+ARG BASE_REGISTRY=swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library
+
 # ====== 阶段 1：构建前端 ======
-FROM swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/node:22-alpine AS frontend-builder
+FROM ${BASE_REGISTRY}/node:22-alpine AS frontend-builder
 
 # 前端构建参数（仅构建阶段生效，不影响运行时）
 ARG VITE_API_BASE_URL=/
@@ -16,8 +21,8 @@ COPY frontend/ ./
 RUN npm run build-only
 
 # ====== 阶段 2：构建后端 ======
-# 使用官方 golang 镜像（支持 amd64 + arm64 多架构，配合 buildx 使用）
-FROM swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/golang:1.25-alpine AS backend-builder
+# 1.26：go.mod 依赖的 tdl/core 要求 go >= 1.25.8，直接用更高的小版本避免构建时下载 toolchain
+FROM ${BASE_REGISTRY}/golang:1.26-alpine AS backend-builder
 
 # CGO 依赖：gorm 的 sqlite 驱动基于 mattn/go-sqlite3，需要 gcc + musl-dev
 # git：go mod download 拉取部分依赖时需要
@@ -43,7 +48,7 @@ COPY backend/ ./
 RUN go build -trimpath -ldflags="-s -w" -o /out/video-captions ./cmd/api
 
 # ====== 阶段 3：运行时 ======
-FROM swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/alpine:3.20
+FROM ${BASE_REGISTRY}/alpine:3.20
 
 # 运行时依赖：
 #  - ffmpeg（含 ffprobe）：ffmpeg.provider=local 时必需

@@ -3,6 +3,7 @@ package logic
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -22,8 +23,16 @@ import (
 	"video-captions/internal/dto/req"
 	"video-captions/internal/dto/res"
 	"video-captions/internal/model"
+	"video-captions/internal/telegram"
 	"video-captions/utils/logger"
 )
+
+// telegramReadyTimeout 创建 Telegram 下载任务时等待连接就绪的最长时间
+const telegramReadyTimeout = 5 * time.Second
+
+// maxConcurrentTelegramDownloads 同时进行的 Telegram 下载上限。
+// Telegram 对用户账号的并发请求较敏感，并发过高容易触发风控，这里做保守限制。
+const maxConcurrentTelegramDownloads = 2
 
 // DownloadLogic 下载任务管理业务逻辑
 type DownloadLogic struct {
@@ -35,6 +44,9 @@ type DownloadLogic struct {
 	pathMu       sync.Mutex
 	runningPaths map[string]string
 
+	// tgSlots 限制同时进行的 Telegram 下载数量
+	tgSlots chan struct{}
+
 	// wg 跟踪运行中的下载 goroutine，保证优雅关闭时等待其落定终态
 	wg sync.WaitGroup
 }
@@ -44,6 +56,7 @@ func NewDownloadLogic() *DownloadLogic {
 	return &DownloadLogic{
 		runningCancels: make(map[string]context.CancelFunc),
 		runningPaths:   make(map[string]string),
+		tgSlots:        make(chan struct{}, maxConcurrentTelegramDownloads),
 	}
 }
 
@@ -68,13 +81,15 @@ func (l *DownloadLogic) CreateDownload(ctx context.Context, createReq *req.Downl
 		return nil, enum.ErrInvalidParam.WithMsg("视频链接必须以 http:// 或 https:// 开头")
 	}
 
-	// 校验 yt-dlp 组件是否就绪
-	if missing := component.CheckTaskDependencies(ctx, model.TaskTypeDownload); len(missing) > 0 {
-		return nil, componentMissingErr(missing)
+	// 识别链接所属平台，Telegram 链接改走 MTProto 下载
+	platform := DetectPlatform(createReq.URL)
+	if err := checkPlatformDependencies(ctx, platform); err != nil {
+		return nil, err
 	}
 
 	download := &model.Download{
 		URL:         createReq.URL,
+		Platform:    platform,
 		Status:      model.DownloadStatusPending,
 		Overwrite:   createReq.Overwrite,
 		DownloadDir: createReq.DownloadDir,
@@ -96,6 +111,39 @@ func (l *DownloadLogic) CreateDownload(ctx context.Context, createReq *req.Downl
 // isValidDownloadURL 校验下载链接必须为 http/https 协议，防止参数注入
 func isValidDownloadURL(u string) bool {
 	return strings.HasPrefix(u, "http://") || strings.HasPrefix(u, "https://")
+}
+
+// DetectPlatform 根据链接识别下载平台：Telegram 链接走 MTProto，其余交给 yt-dlp
+func DetectPlatform(rawURL string) string {
+	if telegram.IsTelegramURL(rawURL) {
+		return model.DownloadPlatformTelegram
+	}
+	return model.DownloadPlatformYtDlp
+}
+
+// checkPlatformDependencies 校验指定平台所需的依赖是否就绪
+func checkPlatformDependencies(ctx context.Context, platform string) error {
+	if platform != model.DownloadPlatformTelegram {
+		if missing := component.CheckTaskDependencies(ctx, model.TaskTypeDownload); len(missing) > 0 {
+			return componentMissingErr(missing)
+		}
+		return nil
+	}
+
+	engine := telegram.Global()
+	if engine == nil || !engine.Configured() {
+		return enum.ErrTelegramNotConfigured
+	}
+
+	// 连接可能仍在建立中，短暂等待后再判定登录状态
+	_, authorized, err := engine.ReadyState(ctx, telegramReadyTimeout)
+	if err != nil {
+		return enum.ErrTelegramNotReady
+	}
+	if !authorized {
+		return enum.ErrTelegramNotLoggedIn
+	}
+	return nil
 }
 
 // ListDownloads 分页查询下载任务列表
@@ -208,10 +256,13 @@ func (l *DownloadLogic) DeleteDownload(ctx context.Context, id string, deleteFil
 
 	// 如果勾选了删除本地文件
 	if deleteFile && dl.FileName != "" && dl.FileSize > 0 {
-		// 从输入目录查找文件
-		inputDir := getInputDir(ctx)
-		if inputDir != "" {
-			filePath := filepath.Join(inputDir, dl.FileName)
+		// 下载目录优先取任务自身记录，其次回退到本地视频目录
+		dir := dl.DownloadDir
+		if dir == "" {
+			dir = getInputDir(ctx)
+		}
+		if dir != "" {
+			filePath := filepath.Join(dir, dl.FileName)
 			if _, statErr := os.Stat(filePath); statErr == nil {
 				if removeErr := os.Remove(filePath); removeErr != nil {
 					logger.WithTraceID(ctx).Warn("删除下载文件失败",
@@ -239,6 +290,16 @@ func (l *DownloadLogic) DeleteDownload(ctx context.Context, id string, deleteFil
 	return nil
 }
 
+// probeResult 探测阶段得到的媒体元信息
+type probeResult struct {
+	// Title 视频标题（不含扩展名）
+	Title string
+	// Duration 时长（秒）
+	Duration int64
+	// Ext 预期扩展名，含前导点
+	Ext string
+}
+
 // runDownload 后台执行下载任务（在独立 goroutine 中运行）
 func (l *DownloadLogic) runDownload(ctx context.Context, dl *model.Download) {
 	defer l.wg.Done()
@@ -247,6 +308,7 @@ func (l *DownloadLogic) runDownload(ctx context.Context, dl *model.Download) {
 
 	logger.WithTraceID(ctx).Info("开始执行下载任务",
 		zap.String("download_id", dl.ID),
+		zap.String("platform", dl.Platform),
 		zap.String("url", dl.URL),
 	)
 
@@ -255,7 +317,7 @@ func (l *DownloadLogic) runDownload(ctx context.Context, dl *model.Download) {
 	// 1. 探测阶段：获取视频元信息
 	l.updateProgress(dbCtx, dl.ID, model.DownloadStatusProbing, 0, "正在解析视频信息...")
 
-	title, duration, err := l.probeVideoInfo(ctx, dl.URL)
+	probe, err := l.probeMedia(ctx, dl)
 	if err != nil {
 		// 检查是否为取消操作
 		if l.isCancelled(ctx) {
@@ -269,8 +331,8 @@ func (l *DownloadLogic) runDownload(ctx context.Context, dl *model.Download) {
 
 	// 更新标题和时长
 	model.DB.WithContext(dbCtx).Model(&model.Download{}).Where("id = ?", dl.ID).Updates(map[string]interface{}{
-		"title":        title,
-		"duration":     duration,
+		"title":        probe.Title,
+		"duration":     probe.Duration,
 		"status":       model.DownloadStatusDownloading,
 		"progress":     0,
 		"progress_msg": "正在下载...",
@@ -278,8 +340,8 @@ func (l *DownloadLogic) runDownload(ctx context.Context, dl *model.Download) {
 
 	logger.WithTraceID(ctx).Info("视频信息解析完成",
 		zap.String("download_id", dl.ID),
-		zap.String("title", title),
-		zap.Int64("duration", duration),
+		zap.String("title", probe.Title),
+		zap.Int64("duration", probe.Duration),
 	)
 
 	// 2. 下载阶段：获取下载目录（用户指定dir优先，否则用本地视频目录）
@@ -296,32 +358,15 @@ func (l *DownloadLogic) runDownload(ctx context.Context, dl *model.Download) {
 		return
 	}
 
-	// 处理输出文件冲突：overwrite=false 时自动编号，true 时直接覆盖
-	outputTemplate := filepath.Join(inputDir, "%(title)s.%(ext)s")
-	if !dl.Overwrite {
-		// 预估目标路径（yt-dlp 默认用 mp4），检查是否冲突
-		titleSafe := sanitizeFilename(title)
-		expectedPath := filepath.Join(inputDir, titleSafe+".mp4")
-		uniquePath := resolveUniquePath(expectedPath)
-		if uniquePath != expectedPath {
-			// 有冲突，使用带编号的模板
-			baseName := strings.TrimSuffix(filepath.Base(uniquePath), ".mp4")
-			outputTemplate = filepath.Join(inputDir, baseName+".%(ext)s")
-			logger.WithTraceID(ctx).Info("文件冲突，自动编号",
-				zap.String("download_id", dl.ID),
-				zap.String("original", expectedPath),
-				zap.String("unique", uniquePath),
-			)
-		}
+	var (
+		downloadedPath string
+		fileSize       int64
+	)
+	if dl.Platform == model.DownloadPlatformTelegram {
+		downloadedPath, fileSize, err = l.downloadFromTelegram(ctx, dl, probe, inputDir)
+	} else {
+		downloadedPath, fileSize, err = l.downloadFromYtDlp(ctx, dl, probe, inputDir)
 	}
-
-	// 用预测路径预注册到 runningPaths（executeDownload 会从 Destination 行更新为实际路径）
-	titleSafe := sanitizeFilename(title)
-	predictedPath := strings.ReplaceAll(outputTemplate, "%(title)s", titleSafe)
-	predictedPath = strings.ReplaceAll(predictedPath, "%(ext)s", "mp4")
-	l.registerPath(dl.ID, predictedPath)
-
-	downloadedPath, fileSize, err := l.executeDownload(ctx, dl.ID, dl.URL, outputTemplate, dl.Overwrite)
 	if err != nil {
 		// 检查是否为取消操作
 		if l.isCancelled(ctx) {
@@ -342,7 +387,7 @@ func (l *DownloadLogic) runDownload(ctx context.Context, dl *model.Download) {
 	fileName := filepath.Base(downloadedPath)
 
 	// 调用 VideoUpsertByPath 写入 videos 表
-	if _, upsertErr := model.VideoUpsertByPath(dbCtx, downloadedPath, fileSize, duration, 0, 0); upsertErr != nil {
+	if _, upsertErr := model.VideoUpsertByPath(dbCtx, downloadedPath, fileSize, probe.Duration, 0, 0); upsertErr != nil {
 		logger.WithTraceID(ctx).Warn("下载完成但录入视频库失败",
 			zap.String("download_id", dl.ID),
 			zap.String("path", downloadedPath),
@@ -351,11 +396,166 @@ func (l *DownloadLogic) runDownload(ctx context.Context, dl *model.Download) {
 		// 不阻断，仍标记下载完成
 	}
 
-	model.DownloadMarkCompleted(dbCtx, dl.ID, fileName, fileSize, duration)
+	model.DownloadMarkCompleted(dbCtx, dl.ID, fileName, fileSize, probe.Duration)
 	logger.WithTraceID(ctx).Info("下载任务执行完成",
 		zap.String("download_id", dl.ID),
 		zap.String("file", downloadedPath),
 	)
+}
+
+// probeMedia 按平台探测视频元信息
+func (l *DownloadLogic) probeMedia(ctx context.Context, dl *model.Download) (*probeResult, error) {
+	if dl.Platform == model.DownloadPlatformTelegram {
+		return probeTelegram(ctx, dl.URL)
+	}
+
+	title, duration, err := l.probeVideoInfo(ctx, dl.URL)
+	if err != nil {
+		return nil, err
+	}
+	return &probeResult{Title: title, Duration: duration, Ext: ".mp4"}, nil
+}
+
+// probeTelegram 通过 Telegram 接口解析消息中的媒体
+func probeTelegram(ctx context.Context, rawURL string) (*probeResult, error) {
+	engine := telegram.Global()
+	if engine == nil {
+		return nil, errors.New("Telegram 引擎未初始化")
+	}
+
+	info, err := engine.ResolveMedia(ctx, rawURL)
+	if err != nil {
+		return nil, err
+	}
+
+	ext := filepath.Ext(info.Name)
+	title := strings.TrimSuffix(info.Name, ext)
+	if title == "" {
+		title = fmt.Sprintf("telegram_%d", info.MessageID)
+	}
+	if ext == "" {
+		ext = ".mp4"
+	}
+
+	return &probeResult{Title: title, Duration: info.Duration, Ext: ext}, nil
+}
+
+// downloadFromYtDlp 调用 yt-dlp 下载，最终扩展名由 yt-dlp 决定
+func (l *DownloadLogic) downloadFromYtDlp(ctx context.Context, dl *model.Download, probe *probeResult, inputDir string) (string, int64, error) {
+	// 处理输出文件冲突：overwrite=false 时自动编号，true 时直接覆盖
+	outputTemplate := filepath.Join(inputDir, "%(title)s.%(ext)s")
+	if !dl.Overwrite {
+		// 预估目标路径（yt-dlp 默认用 mp4），检查是否冲突
+		titleSafe := sanitizeFilename(probe.Title)
+		expectedPath := filepath.Join(inputDir, titleSafe+".mp4")
+		uniquePath := resolveUniquePath(expectedPath)
+		if uniquePath != expectedPath {
+			// 有冲突，使用带编号的模板
+			baseName := strings.TrimSuffix(filepath.Base(uniquePath), ".mp4")
+			outputTemplate = filepath.Join(inputDir, baseName+".%(ext)s")
+			logger.WithTraceID(ctx).Info("文件冲突，自动编号",
+				zap.String("download_id", dl.ID),
+				zap.String("original", expectedPath),
+				zap.String("unique", uniquePath),
+			)
+		}
+	}
+
+	// 用预测路径预注册到 runningPaths（executeDownload 会从 Destination 行更新为实际路径）
+	titleSafe := sanitizeFilename(probe.Title)
+	predictedPath := strings.ReplaceAll(outputTemplate, "%(title)s", titleSafe)
+	predictedPath = strings.ReplaceAll(predictedPath, "%(ext)s", "mp4")
+	l.registerPath(dl.ID, predictedPath)
+
+	return l.executeDownload(ctx, dl.ID, dl.URL, outputTemplate, dl.Overwrite)
+}
+
+// downloadFromTelegram 通过内置 MTProto 客户端下载，目标路径在下载前即可确定
+func (l *DownloadLogic) downloadFromTelegram(ctx context.Context, dl *model.Download, probe *probeResult, inputDir string) (string, int64, error) {
+	engine := telegram.Global()
+	if engine == nil {
+		return "", 0, errors.New("Telegram 引擎未初始化")
+	}
+
+	// 排队获取并发槽位：同时进行的 Telegram 下载过多容易触发账号风控
+	select {
+	case l.tgSlots <- struct{}{}:
+		defer func() { <-l.tgSlots }()
+	case <-ctx.Done():
+		return "", 0, ctx.Err()
+	}
+
+	targetPath := filepath.Join(inputDir, sanitizeFilename(probe.Title)+probe.Ext)
+	if !dl.Overwrite {
+		targetPath = resolveUniquePath(targetPath)
+	}
+	l.registerPath(dl.ID, targetPath)
+
+	tracker := &speedTracker{}
+	onProgress := func(downloaded, total int64) {
+		if total <= 0 {
+			return
+		}
+
+		pct := float64(downloaded) / float64(total) * 100
+		progress := int(math.Round(pct))
+		// 完成前不展示 100%，与 yt-dlp 分支保持一致
+		if progress > 99 {
+			progress = 99
+		}
+
+		dbCtx := context.WithoutCancel(ctx)
+		model.DB.WithContext(dbCtx).Model(&model.Download{}).Where("id = ?", dl.ID).Updates(map[string]interface{}{
+			"status":          model.DownloadStatusDownloading,
+			"progress":        progress,
+			"progress_msg":    fmt.Sprintf("正在下载...  %.1f%%", pct),
+			"download_speed":  tracker.update(downloaded),
+			"total_size":      total,
+			"downloaded_size": downloaded,
+			"updated_at":      time.Now().Unix(),
+		})
+	}
+
+	if err := engine.DownloadMedia(ctx, dl.URL, targetPath, onProgress); err != nil {
+		// 删除不完整的文件，避免被视频扫描器当作正常文件入库
+		if removeErr := os.Remove(targetPath); removeErr != nil && !os.IsNotExist(removeErr) {
+			logger.WithTraceID(ctx).Warn("清理未完成的下载文件失败",
+				zap.String("download_id", dl.ID),
+				zap.String("path", targetPath),
+				zap.Error(removeErr),
+			)
+		}
+		return "", 0, err
+	}
+
+	fi, statErr := os.Stat(targetPath)
+	if statErr != nil {
+		return "", 0, fmt.Errorf("下载完成后读取文件失败: %w", statErr)
+	}
+	return targetPath, fi.Size(), nil
+}
+
+// speedTracker 由进度回调推算下载速度
+type speedTracker struct {
+	mu       sync.Mutex
+	lastAt   time.Time
+	lastSize int64
+	speed    int64
+}
+
+func (s *speedTracker) update(downloaded int64) int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now()
+	if !s.lastAt.IsZero() {
+		if elapsed := now.Sub(s.lastAt).Seconds(); elapsed > 0 {
+			s.speed = int64(float64(downloaded-s.lastSize) / elapsed)
+		}
+	}
+	s.lastAt = now
+	s.lastSize = downloaded
+	return s.speed
 }
 
 // isCancelled 检查 context 是否被取消
@@ -368,14 +568,31 @@ func (l *DownloadLogic) isCancelled(ctx context.Context) bool {
 	}
 }
 
+// ytDlpProxyArgs 返回 yt-dlp 的代理参数；未启用或未配置代理时返回 nil。
+// 返回值必须插在 "--" 终止符之前，否则会被 yt-dlp 当成待下载的 URL。
+func ytDlpProxyArgs(ctx context.Context) []string {
+	return buildProxyArgs(proxyEnabledForYtdlp(ctx), getProxyURL(ctx))
+}
+
+// buildProxyArgs 由「是否启用」与「代理地址」构造 yt-dlp 代理参数
+func buildProxyArgs(enabled bool, proxyURL string) []string {
+	if !enabled || proxyURL == "" {
+		return nil
+	}
+	return []string{"--proxy", proxyURL}
+}
+
 // probeVideoInfo 探测视频标题和时长
 func (l *DownloadLogic) probeVideoInfo(ctx context.Context, url string) (title string, duration int64, err error) {
 	// 元信息探测整体限时，避免远端挂起时无限占用工作槽
 	probeCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 
+	proxyArgs := ytDlpProxyArgs(ctx)
+
 	// 获取标题
-	titleCmd := exec.CommandContext(probeCtx, "yt-dlp", "--print", "title", "--", url)
+	titleArgs := append(proxyArgs, "--print", "title", "--", url)
+	titleCmd := exec.CommandContext(probeCtx, "yt-dlp", titleArgs...)
 	titleCmd.Env = os.Environ()
 	titleCmd.Env = append(titleCmd.Env, "PYTHONUNBUFFERED=1")
 	titleOut, titleErr := titleCmd.Output()
@@ -388,7 +605,8 @@ func (l *DownloadLogic) probeVideoInfo(ctx context.Context, url string) (title s
 	}
 
 	// 获取时长（秒）
-	durationCmd := exec.CommandContext(probeCtx, "yt-dlp", "--print", "duration_string", "--", url)
+	durationArgs := append(proxyArgs, "--print", "duration_string", "--", url)
+	durationCmd := exec.CommandContext(probeCtx, "yt-dlp", durationArgs...)
 	durationCmd.Env = os.Environ()
 	durationCmd.Env = append(durationCmd.Env, "PYTHONUNBUFFERED=1")
 	durOut, durErr := durationCmd.Output()
@@ -460,13 +678,15 @@ func (l *DownloadLogic) executeDownload(ctx context.Context, downloadID, url, ou
 	args := []string{
 		"-o", outputTemplate,
 		"--newline",
-		// "--" 终止选项解析，防止 URL 内容被 yt-dlp 当作选项（纵深防御，入参已校验 scheme）
-		"--",
-		url,
 	}
+	args = append(args, ytDlpProxyArgs(ctx)...)
 	if overwrite {
 		args = append(args, "--force-overwrites")
 	}
+	// "--" 终止选项解析，防止 URL 内容被 yt-dlp 当作选项（纵深防御，入参已校验 scheme）。
+	// 必须放在所有选项之后，否则 "--" 后面的内容会被当成额外的 URL。
+	args = append(args, "--", url)
+
 	cmd := exec.CommandContext(ctx, "yt-dlp", args...)
 	// 设置 PYTHONUNBUFFERED=1，确保 yt-dlp（Python 进程）的输出即时刷新
 	cmd.Env = os.Environ()
@@ -803,6 +1023,7 @@ func downloadToRes(dl *model.Download) *res.DownloadRes {
 	return &res.DownloadRes{
 		ID:             dl.ID,
 		URL:            dl.URL,
+		Platform:       dl.Platform,
 		Status:         dl.Status,
 		Progress:       dl.Progress,
 		ProgressMsg:    dl.ProgressMsg,

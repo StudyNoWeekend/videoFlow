@@ -4,6 +4,7 @@ package res
 type DownloadRes struct {
 	ID             string `json:"id"`
 	URL            string `json:"url"`
+	Platform       string `json:"platform"`
 	Status         string `json:"status"`
 	Progress       int    `json:"progress"`
 	ProgressMsg    string `json:"progress_msg,omitempty"`

@@ -44,6 +44,16 @@ const (
 	SettingKeyUpscaleDevice           = "upscale_device"
 	SettingKeyUpscaleConcurrency      = "upscale_concurrency"
 	SettingKeyDownloadConcurrency     = "download_concurrency"
+	SettingKeyTelegramAppID           = "telegram_app_id"
+	SettingKeyTelegramAppHash         = "telegram_app_hash"
+	SettingKeyTelegramThreads         = "telegram_threads"
+	SettingKeyTelegramDataDir         = "telegram_data_dir"
+	// SettingKeyTelegramProxy 已废弃，仅用于兼容读取旧值（全局代理上线前 Telegram 独占的代理配置）
+	SettingKeyTelegramProxy = "telegram_proxy"
+	// SettingKeyProxyURL 全局出站代理，Telegram 与 yt-dlp 共用
+	SettingKeyProxyURL = "proxy_url"
+	// SettingKeyProxyForYtdlp yt-dlp 是否使用全局代理
+	SettingKeyProxyForYtdlp = "proxy_for_ytdlp"
 )
 
 // 统一设置项默认值（字符串形式持久化）
@@ -73,6 +83,14 @@ const (
 	DefaultUpscaleDockerImage      = "ghcr.io/k4yt3x/video2x:latest"
 	DefaultUpscaleDevice           = "cpu"
 	DefaultUpscaleConcurrency      = "1"
+	// Telegram 下载默认值；app_id/app_hash 出于安全考虑不内置任何凭据，需用户自行申请配置
+	DefaultTelegramAppID   = ""
+	DefaultTelegramAppHash = ""
+	DefaultTelegramThreads = "4"
+	DefaultTelegramDataDir = "data/telegram"
+	// 全局出站代理默认值：默认不启用代理，但 yt-dlp 开关默认打开
+	DefaultProxyURL      = ""
+	DefaultProxyForYtdlp = "true"
 )
 
 // TableName 指定表名

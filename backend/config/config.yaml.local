@@ -48,3 +48,26 @@ concurrency:
   subtitle: 2
   repair: 1
   translate: 1
+
+# 全局出站代理（可被 settings 表覆盖），Telegram 与 yt-dlp 共用。
+# 支持 socks5/socks5h/http/https，留空表示直连。
+# 注意：Docker 拉镜像、系统包管理器安装、SSH 远程 ffmpeg 不走应用层网络栈，不受此配置影响。
+proxy:
+  url: ""
+  # yt-dlp 是否使用该代理。若代理是「全局模式」（所有流量都走代理），
+  # 下载国内站点（如 B 站）会绕远，可关掉此项让 yt-dlp 直连。
+  use_for_ytdlp: true
+
+# Telegram 下载配置（可被 settings 表覆盖）。
+# app_id / app_hash 需自行到 https://my.telegram.org 申请，留空则 Telegram 下载功能不可用。
+telegram:
+  app_id: 0
+  app_hash: ""
+  # 会话文件存放目录（含授权密钥，等同账号凭据，请勿外泄）
+  data_dir: data/telegram
+  # 单个文件的分片下载并发数
+  threads: 4
+  # 每个 DC 的连接池大小
+  pool_size: 4
+  # 客户端内部重连退避上限（秒）
+  reconnect_timeout: 300

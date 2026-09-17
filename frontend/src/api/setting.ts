@@ -23,6 +23,15 @@ export interface Setting {
   upscale_docker_image: string
   upscale_device: 'cpu' | 'cuda:0' | 'mps' | 'xpu:0'
   upscale_concurrency: number
+  // Telegram 下载配置：app_id/app_hash 需到 my.telegram.org 申请，留空表示停用
+  telegram_app_id: string
+  telegram_app_hash: string
+  telegram_threads: number
+  telegram_data_dir: string
+  // 全局出站代理：Telegram 与 yt-dlp 共用，支持 socks5/socks5h/http/https
+  proxy_url: string
+  // yt-dlp 是否使用全局代理（代理为全局模式时可关掉，避免国内站点绕远）
+  proxy_for_ytdlp: boolean
 }
 
 /**

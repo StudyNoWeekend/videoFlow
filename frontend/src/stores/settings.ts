@@ -24,6 +24,12 @@ const defaultSetting: Setting = {
   upscale_docker_image: 'ghcr.io/k4yt3x/video2x:latest',
   upscale_device: 'cpu',
   upscale_concurrency: 1,
+  telegram_app_id: '',
+  telegram_app_hash: '',
+  telegram_threads: 4,
+  telegram_data_dir: 'data/telegram',
+  proxy_url: '',
+  proxy_for_ytdlp: true,
 }
 
 // 设置中心 Store，管理统一配置对象

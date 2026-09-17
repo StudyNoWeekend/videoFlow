@@ -6,11 +6,19 @@ import { useComponentStore } from '@/stores/component'
 import { getActiveSession, getInstallHistory } from '@/api/component'
 import type { ComponentInfo, ComponentInstallReq } from '@/api/component'
 import VfListPanel from '@/components/VfListPanel.vue'
+import TelegramLoginDialog from '@/components/TelegramLoginDialog.vue'
 
 const { t } = useI18n()
 
 const componentStore = useComponentStore()
 const refreshing = ref(false)
+
+// Telegram 登录弹窗
+const telegramLoginVisible = ref(false)
+
+function openTelegramLogin(): void {
+  telegramLoginVisible.value = true
+}
 
 // Dialog states
 const installDialogVisible = ref(false)
@@ -338,6 +346,15 @@ onMounted(async () => {
             <template v-else-if="comp.type === 'yt-dlp'">
               <el-text v-if="comp.status === 'missing' || comp.status === 'error'">{{ $t('components.ytdlp_not_deployed') }}</el-text>
             </template>
+            <!-- Telegram 为内置客户端，无需安装，只需在设置中配置凭据并扫码登录 -->
+            <template v-else-if="comp.type === 'telegram'">
+              <el-text v-if="comp.status !== 'installed'">
+                {{ comp.error_msg || $t('components.telegram_not_ready') }}
+              </el-text>
+              <el-button type="primary" size="small" @click="openTelegramLogin">
+                {{ $t('telegram.login.action') }}
+              </el-button>
+            </template>
             <template v-else>
               <template v-if="comp.status === 'installing'">
                 <el-button type="primary" size="small" @click="handleShowLog(comp)">
@@ -371,6 +388,8 @@ onMounted(async () => {
         </div>
       </div>
     </VfListPanel>
+
+    <TelegramLoginDialog v-model="telegramLoginVisible" @success="handleRefresh" />
 
     <!-- Install Config Dialog -->
     <el-dialog

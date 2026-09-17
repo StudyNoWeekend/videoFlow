@@ -10,6 +10,7 @@ const (
 	ComponentLada       ComponentType = "lada"
 	ComponentVideo2X    ComponentType = "video2x"
 	ComponentYtDlp      ComponentType = "yt-dlp"
+	ComponentTelegram   ComponentType = "telegram"
 )
 
 // ComponentStatus 组件状态

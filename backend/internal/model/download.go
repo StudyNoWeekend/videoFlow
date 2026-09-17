@@ -20,10 +20,19 @@ const (
 	DownloadStatusCancelled   = "cancelled"
 )
 
+// 下载平台枚举
+const (
+	// DownloadPlatformYtDlp 由 yt-dlp 处理的通用站点
+	DownloadPlatformYtDlp = "yt-dlp"
+	// DownloadPlatformTelegram 由内置 MTProto 客户端处理的 t.me 链接
+	DownloadPlatformTelegram = "telegram"
+)
+
 // Download 下载任务数据模型
 type Download struct {
 	BaseModel
 	URL            string `gorm:"type:varchar(2048);not null;comment:视频链接" json:"url"`
+	Platform       string `gorm:"type:varchar(32);not null;default:'';index:idx_download_platform;comment:下载平台 yt-dlp/telegram" json:"platform"`
 	Status         string `gorm:"type:varchar(32);not null;default:'pending';index:idx_download_status;comment:下载状态 pending/probing/downloading/completed/failed/cancelled" json:"status"`
 	Progress       int    `gorm:"default:0;comment:进度 0-100" json:"progress"`
 	ProgressMsg    string `gorm:"type:text;comment:当前进度描述" json:"progress_msg"`

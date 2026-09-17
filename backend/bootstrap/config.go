@@ -3,6 +3,7 @@ package bootstrap
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/viper"
@@ -12,7 +13,7 @@ import (
 var Config *AppConfig
 
 // AppVersion 应用版本号
-const AppVersion = "v0.4.1"
+const AppVersion = "v0.5.0"
 
 // AppConfig 应用配置总入口
 type AppConfig struct {
@@ -30,6 +31,32 @@ type AppConfig struct {
 	Upscale     AppConfigUpscale     `mapstructure:"upscale"`
 	Scheduler   AppConfigScheduler   `mapstructure:"scheduler"`
 	Concurrency AppConfigConcurrency `mapstructure:"concurrency"`
+	Telegram    AppConfigTelegram    `mapstructure:"telegram"`
+	Proxy       AppConfigProxy       `mapstructure:"proxy"`
+}
+
+// AppConfigProxy 全局出站代理配置，供 Telegram 与 yt-dlp 等需要访问外网的功能共用。
+// 注意：Docker 拉镜像、系统包管理器安装、SSH 远程 ffmpeg 不经过应用层网络栈，不受此配置影响。
+type AppConfigProxy struct {
+	// URL 支持 socks5/socks5h/http/https，为空表示直连
+	URL string `mapstructure:"url"`
+	// UseForYtdlp 是否让 yt-dlp 使用该代理
+	UseForYtdlp bool `mapstructure:"use_for_ytdlp"`
+}
+
+// AppConfigTelegram Telegram 下载配置
+type AppConfigTelegram struct {
+	// AppID/AppHash 需到 my.telegram.org 申请，未配置时 Telegram 下载不可用
+	AppID   int    `mapstructure:"app_id"`
+	AppHash string `mapstructure:"app_hash"`
+	// DataDir 会话文件存放目录
+	DataDir string `mapstructure:"data_dir"`
+	// Threads 单个文件的分片下载并发数
+	Threads int `mapstructure:"threads"`
+	// PoolSize 每个 DC 的连接池大小
+	PoolSize int `mapstructure:"pool_size"`
+	// ReconnectTimeout 客户端内部重连退避上限（秒）
+	ReconnectTimeout int `mapstructure:"reconnect_timeout"`
 }
 
 // AppConfigApp 应用基础配置
@@ -150,6 +177,10 @@ func InitConfig() (*AppConfig, error) {
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	v.AutomaticEnv()
 
+	// 布尔项在配置文件中缺失时 viper 会填零值（false），会把「默认开启」反转成「默认关闭」，
+	// 这里显式声明默认值，保证老配置文件未写该项时语义仍然正确
+	v.SetDefault("proxy.use_for_ytdlp", true)
+
 	if err := v.ReadInConfig(); err != nil {
 		return nil, fmt.Errorf("读取配置文件失败: %w", err)
 	}
@@ -164,9 +195,17 @@ func InitConfig() (*AppConfig, error) {
 		cfg.ASR.APIKey = apiKey
 	}
 
-	// 后端端口固定为 8080，不允许通过环境变量或配置文件修改
-	// Docker 容器内通过 nginx 反向代理，仅暴露前端端口
-	cfg.HTTP.Port = 8080
+	// 后端端口默认 8080：Docker 容器内通过 nginx 反向代理，仅暴露前端端口。
+	// 本地源码运行时可用 APP_HTTP_PORT 覆盖，避免与其他服务端口冲突。
+	if port := os.Getenv("APP_HTTP_PORT"); port != "" {
+		p, err := strconv.Atoi(port)
+		if err != nil || p < 1 || p > 65535 {
+			return nil, fmt.Errorf("环境变量 APP_HTTP_PORT 无效: %s", port)
+		}
+		cfg.HTTP.Port = p
+	} else {
+		cfg.HTTP.Port = 8080
+	}
 
 	Config = cfg
 	return cfg, nil

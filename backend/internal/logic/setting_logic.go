@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
+	"strings"
+	"time"
 
 	"video-captions/bootstrap"
 	"video-captions/enum"
@@ -14,6 +17,7 @@ import (
 	"video-captions/internal/ffmpeg"
 	"video-captions/internal/model"
 	"video-captions/internal/repair"
+	"video-captions/internal/telegram"
 	"video-captions/internal/upscale"
 	"video-captions/utils/logger"
 
@@ -59,6 +63,12 @@ func (l *SettingLogic) GetSettings(ctx context.Context) (*res.SettingRes, error)
 	upscaleDockerImage := model.SettingGetOrDefault(ctx, model.SettingKeyUpscaleDockerImage, l.defaultUpscaleDockerImage())
 	upscaleDevice := model.SettingGetOrDefault(ctx, model.SettingKeyUpscaleDevice, l.defaultUpscaleDevice())
 	upscaleConcurrency := l.settingIntOrDefault(ctx, model.SettingKeyUpscaleConcurrency, l.defaultUpscaleConcurrency(), 1, 50)
+	telegramAppID := model.SettingGetOrDefault(ctx, model.SettingKeyTelegramAppID, l.defaultTelegramAppID())
+	telegramAppHash := model.SettingGetOrDefault(ctx, model.SettingKeyTelegramAppHash, l.defaultTelegramAppHash())
+	telegramThreads := l.settingIntOrDefault(ctx, model.SettingKeyTelegramThreads, l.defaultTelegramThreads(), 1, 16)
+	telegramDataDir := model.SettingGetOrDefault(ctx, model.SettingKeyTelegramDataDir, l.defaultTelegramDataDir())
+	proxyURL := getProxyURL(ctx)
+	proxyForYtdlp := proxyEnabledForYtdlp(ctx)
 	return &res.SettingRes{
 		VideoDir:                videoDir,
 		OutputDir:               outputDir,
@@ -80,6 +90,12 @@ func (l *SettingLogic) GetSettings(ctx context.Context) (*res.SettingRes, error)
 		UpscaleDockerImage:      upscaleDockerImage,
 		UpscaleDevice:           upscaleDevice,
 		UpscaleConcurrency:      upscaleConcurrency,
+		TelegramAppID:           telegramAppID,
+		TelegramAppHash:         telegramAppHash,
+		TelegramThreads:         telegramThreads,
+		TelegramDataDir:         telegramDataDir,
+		ProxyURL:                proxyURL,
+		ProxyForYtdlp:           proxyForYtdlp,
 	}, nil
 }
 
@@ -119,6 +135,9 @@ func (l *SettingLogic) UpdateSettings(ctx context.Context, updateReq *req.Settin
 	if updateReq.UpscaleDevice != "" && !validRepairDevices[updateReq.UpscaleDevice] {
 		return enum.ErrInvalidParam.WithMsg("清晰度去马赛克设备必须是 cpu、cuda:0、mps 或 xpu:0")
 	}
+	if err := validateProxyURL(updateReq.ProxyURL); err != nil {
+		return err
+	}
 
 	settings := map[string]string{
 		model.SettingKeyVideoDir:                updateReq.VideoDir,
@@ -141,6 +160,12 @@ func (l *SettingLogic) UpdateSettings(ctx context.Context, updateReq *req.Settin
 		model.SettingKeyUpscaleDockerImage:      updateReq.UpscaleDockerImage,
 		model.SettingKeyUpscaleDevice:           updateReq.UpscaleDevice,
 		model.SettingKeyUpscaleConcurrency:      strconv.Itoa(updateReq.UpscaleConcurrency),
+		model.SettingKeyTelegramAppID:           updateReq.TelegramAppID,
+		model.SettingKeyTelegramAppHash:         updateReq.TelegramAppHash,
+		model.SettingKeyTelegramThreads:         strconv.Itoa(updateReq.TelegramThreads),
+		model.SettingKeyTelegramDataDir:         updateReq.TelegramDataDir,
+		model.SettingKeyProxyURL:                updateReq.ProxyURL,
+		model.SettingKeyProxyForYtdlp:           strconv.FormatBool(updateReq.ProxyForYtdlp),
 	}
 
 	for key, value := range settings {
@@ -158,6 +183,9 @@ func (l *SettingLogic) UpdateSettings(ctx context.Context, updateReq *req.Settin
 	}
 	if err := l.ApplyUpscaleFromSettings(ctx); err != nil {
 		logger.WithTraceID(ctx).Warn("清晰度去马赛克配置重新加载失败", zap.Error(err))
+	}
+	if err := l.ApplyTelegramFromSettings(ctx); err != nil {
+		logger.WithTraceID(ctx).Warn("Telegram 配置重新加载失败", zap.Error(err))
 	}
 
 	return nil
@@ -212,6 +240,46 @@ func (l *SettingLogic) ApplyUpscaleFromSettings(ctx context.Context) error {
 		return nil
 	}
 	return bootstrap.UpscaleExecutor.Reload(cfg)
+}
+
+// ApplyTelegramFromSettings 从 settings 表加载 Telegram 配置并立即生效（保存后/启动时调用）。
+// 连接参数变化时引擎会自动重启连接，已保存的会话不受影响。
+func (l *SettingLogic) ApplyTelegramFromSettings(ctx context.Context) error {
+	engine := telegram.Global()
+	if engine == nil {
+		return nil
+	}
+	engine.Reconfigure(l.loadTelegramConfig(ctx))
+	return nil
+}
+
+// loadTelegramConfig 从 settings 表优先读取 Telegram 配置，未设置时回退到配置文件/默认值
+func (l *SettingLogic) loadTelegramConfig(ctx context.Context) telegram.Config {
+	cfg := telegram.Config{
+		AppID:   parseTelegramAppID(model.SettingGetOrDefault(ctx, model.SettingKeyTelegramAppID, l.defaultTelegramAppID())),
+		AppHash: model.SettingGetOrDefault(ctx, model.SettingKeyTelegramAppHash, l.defaultTelegramAppHash()),
+		// 代理走全局配置，与 yt-dlp 共用
+		Proxy:   getProxyURL(ctx),
+		DataDir: model.SettingGetOrDefault(ctx, model.SettingKeyTelegramDataDir, l.defaultTelegramDataDir()),
+		Threads: l.settingIntOrDefault(ctx, model.SettingKeyTelegramThreads, l.defaultTelegramThreads(), 1, 16),
+	}
+
+	// 连接池与重连退避不对外开放配置，直接取配置文件默认值
+	if bootstrap.Config != nil {
+		cfg.PoolSize = bootstrap.Config.Telegram.PoolSize
+		cfg.ReconnectTimeout = time.Duration(bootstrap.Config.Telegram.ReconnectTimeout) * time.Second
+	}
+
+	return cfg
+}
+
+// parseTelegramAppID 解析 api_id，非法或未配置时返回 0（引擎将保持停用）
+func parseTelegramAppID(value string) int {
+	appID, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || appID < 0 {
+		return 0
+	}
+	return appID
 }
 
 // loadUpscaleConfig 从 settings 表优先读取清晰度去马赛克配置，未设置时回退到配置文件/默认值。
@@ -394,6 +462,93 @@ func (l *SettingLogic) defaultUpscaleConcurrency() int {
 		return v
 	}
 	return 1
+}
+
+func (l *SettingLogic) defaultTelegramAppID() string {
+	if bootstrap.Config != nil && bootstrap.Config.Telegram.AppID > 0 {
+		return strconv.Itoa(bootstrap.Config.Telegram.AppID)
+	}
+	return model.DefaultTelegramAppID
+}
+
+func (l *SettingLogic) defaultTelegramAppHash() string {
+	if bootstrap.Config != nil && bootstrap.Config.Telegram.AppHash != "" {
+		return bootstrap.Config.Telegram.AppHash
+	}
+	return model.DefaultTelegramAppHash
+}
+
+// getProxyURL 读取全局出站代理。
+// 优先级：settings 表的 proxy_url → 旧键 telegram_proxy → 配置文件 → 默认值。
+// 旧键兜底用于兼容全局代理上线前只配置了 Telegram 代理的部署，无需用户重新填写。
+func getProxyURL(ctx context.Context) string {
+	if value := model.SettingGet(ctx, model.SettingKeyProxyURL); value != "" {
+		return value
+	}
+	if value := model.SettingGet(ctx, model.SettingKeyTelegramProxy); value != "" {
+		return value
+	}
+	if bootstrap.Config != nil && bootstrap.Config.Proxy.URL != "" {
+		return bootstrap.Config.Proxy.URL
+	}
+	return model.DefaultProxyURL
+}
+
+// proxyEnabledForYtdlp yt-dlp 是否使用全局代理
+func proxyEnabledForYtdlp(ctx context.Context) bool {
+	return parseBoolString(model.SettingGetOrDefault(ctx,
+		model.SettingKeyProxyForYtdlp, defaultProxyForYtdlpStr()))
+}
+
+func defaultProxyForYtdlpStr() string {
+	if bootstrap.Config != nil {
+		return strconv.FormatBool(bootstrap.Config.Proxy.UseForYtdlp)
+	}
+	return model.DefaultProxyForYtdlp
+}
+
+// proxySchemes 代理协议白名单：取 Telegram（tdl connectproxy）与 yt-dlp 共同支持的交集
+var proxySchemes = map[string]bool{
+	"socks5":  true,
+	"socks5h": true,
+	"http":    true,
+	"https":   true,
+}
+
+// validateProxyURL 校验代理地址，空串表示直连（合法）
+func validateProxyURL(raw string) error {
+	if raw == "" {
+		return nil
+	}
+
+	u, err := url.Parse(raw)
+	if err != nil {
+		return enum.ErrInvalidParam.WithMsg(fmt.Sprintf("代理地址格式无效: %v", err))
+	}
+	if !proxySchemes[strings.ToLower(u.Scheme)] {
+		return enum.ErrInvalidParam.WithMsg("代理地址必须以 socks5://、socks5h://、http:// 或 https:// 开头")
+	}
+	if u.Host == "" {
+		return enum.ErrInvalidParam.WithMsg("代理地址缺少主机名与端口，例如 socks5://127.0.0.1:1080")
+	}
+	return nil
+}
+
+func (l *SettingLogic) defaultTelegramThreads() int {
+	if bootstrap.Config != nil && bootstrap.Config.Telegram.Threads > 0 {
+		return bootstrap.Config.Telegram.Threads
+	}
+	if v, err := strconv.Atoi(model.DefaultTelegramThreads); err == nil {
+		return v
+	}
+	return 4
+}
+
+func (l *SettingLogic) defaultTelegramDataDir() string {
+	if bootstrap.Config != nil && bootstrap.Config.Telegram.DataDir != "" {
+		return bootstrap.Config.Telegram.DataDir
+	}
+	return model.DefaultTelegramDataDir
 }
 
 func (l *SettingLogic) settingIntOrDefault(ctx context.Context, key string, defaultValue, min, max int) int {

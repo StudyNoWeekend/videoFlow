@@ -30,3 +30,15 @@ Thumbs.db
 
 # Build artifacts
 dist/
+
+# Docker 部署时宿主机挂载的数据与日志目录
+# data/telegram/session.json 含 Telegram 账号授权密钥，等同于账号凭据，严禁提交
+/data/
+/logs/
+/videos/
+/output/
+
+# 本机部署用的 compose 覆盖文件（含机器相关路径与端口）
+docker-compose.local.yml
+# Docker 部署时由用户基于 config.yaml.local 自行创建
+/config.yaml

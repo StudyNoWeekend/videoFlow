@@ -26,4 +26,14 @@ type SettingReq struct {
 	UpscaleDockerImage      string `json:"upscale_docker_image" binding:"omitempty,max=256"`
 	UpscaleDevice           string `json:"upscale_device" binding:"omitempty,oneof=cpu cuda:0 mps xpu:0"`
 	UpscaleConcurrency      int    `json:"upscale_concurrency" binding:"omitempty,gte=1,lte=50"`
+	// TelegramAppID/TelegramAppHash 来自 my.telegram.org，留空表示停用 Telegram 下载
+	TelegramAppID string `json:"telegram_app_id" binding:"omitempty,max=32"`
+	// TelegramAppHash 为敏感凭据，保存后会原样回显给已登录用户
+	TelegramAppHash string `json:"telegram_app_hash" binding:"omitempty,max=128"`
+	TelegramThreads int    `json:"telegram_threads" binding:"omitempty,gte=1,lte=16"`
+	TelegramDataDir string `json:"telegram_data_dir" binding:"omitempty,max=1024"`
+	// ProxyURL 全局出站代理，Telegram 与 yt-dlp 共用；scheme 白名单在 logic 层校验
+	ProxyURL string `json:"proxy_url" binding:"omitempty,max=1024"`
+	// ProxyForYtdlp 是否让 yt-dlp 使用全局代理
+	ProxyForYtdlp bool `json:"proxy_for_ytdlp"`
 }

@@ -234,6 +234,16 @@ repair:
 concurrency:
   subtitle: 2
   repair: 1
+proxy:
+  url: ""                         # 全域出站代理，Telegram 與 yt-dlp 共用；留空直連
+  use_for_ytdlp: true             # yt-dlp 是否走代理（代理為全域模式時可關閉，避免國內站點繞遠）
+telegram:
+  app_id: 0                       # 至 my.telegram.org 申請，留空則停用 Telegram 下載
+  app_hash: ""
+  data_dir: data/telegram         # 工作階段目錄（含授權金鑰，等同帳號憑證）
+  threads: 4                      # 單檔分片下載並發數
+  pool_size: 4                    # 每個 DC 的連線池大小
+  reconnect_timeout: 300          # 重連退避上限（秒）
 ```
 
 </details>
@@ -440,6 +450,22 @@ videoFlow/
 
 </details>
 
+<details>
+<summary><b>Telegram 下載</b></summary>
+
+在下載頁貼上任意 `t.me` 訊息連結，會自動改走內建 MTProto 用戶端而非 yt-dlp（支援公開頻道、私有 `t.me/c/` 連結、話題與留言區連結）。
+
+啟用步驟：
+
+1. 至 [my.telegram.org](https://my.telegram.org) -> API development tools 申請 `api_id` 與 `api_hash`
+2. 在「系統設定 → Telegram 下載」中填入 api_id / api_hash；若所在地區封鎖 Telegram，另需在**「出站代理」**區塊填寫代理（如 `socks5://127.0.0.1:1080`）並儲存
+3. 貼上 `t.me` 連結後會彈出 QR Code，用手機 Telegram 掃描即可登入（帳號開啟兩步驗證時會再要求輸入密碼）
+
+登入工作階段保存在 `data/telegram/`，重啟後無需重新掃碼。
+
+**帳號風險**：此功能以*使用者帳號*（非 Bot）登入，這是下載受限頻道內容所必需的。請使用自己的 api_id/api_hash、不要把 `threads` 調得過高，並避免同時登入過多裝置。`data/telegram/session.json` 內含帳號授權金鑰，等同帳號憑證，請勿提交或外流。
+
+</details>
 ## 🗺️ Roadmap
 
 **✅ 已實作**
@@ -472,7 +498,9 @@ videoFlow/
 
 ## 📜 授權條款
 
-[MIT License](./LICENSE) - 自由使用、修改、散布，只需保留版權聲明。
+本專案自身程式碼以 [MIT License](./LICENSE) 發布。
+
+⚠️ **注意**：Telegram 下載功能依賴的 [iyear/tdl](https://github.com/iyear/tdl) core 模組採用 **AGPL-3.0** 授權。依 AGPL 的傳染性條款，散布包含該功能的本程式（或以網路服務形式對外提供）時，需遵循 AGPL-3.0 並向使用者提供對應原始碼。如需規避，可移除 `internal/telegram` 模組及其依賴，其餘功能不受影響。
 
 ---
 

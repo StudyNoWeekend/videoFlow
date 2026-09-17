@@ -18,6 +18,7 @@ import (
 	"video-captions/internal/router"
 	"video-captions/internal/scanner"
 	"video-captions/internal/scheduler"
+	"video-captions/internal/telegram"
 	"video-captions/utils/logger"
 )
 
@@ -115,6 +116,24 @@ func main() {
 		log.Fatalf("启动视频目录扫描器失败: %v", err)
 	}
 
+	// 初始化 Telegram 下载引擎。未配置凭据时不会建立连接，也不影响其他功能。
+	telegramEngine := telegram.NewEngine(telegram.Config{
+		AppID:            cfg.Telegram.AppID,
+		AppHash:          cfg.Telegram.AppHash,
+		Proxy:            cfg.Proxy.URL,
+		DataDir:          cfg.Telegram.DataDir,
+		Threads:          cfg.Telegram.Threads,
+		PoolSize:         cfg.Telegram.PoolSize,
+		ReconnectTimeout: time.Duration(cfg.Telegram.ReconnectTimeout) * time.Second,
+	}, logger.Logger)
+	telegram.SetGlobal(telegramEngine)
+
+	// settings 表中已保存的配置优先于配置文件
+	if err := logic.NewSettingLogic().ApplyTelegramFromSettings(context.Background()); err != nil {
+		logger.Logger.Warn("加载已保存的 Telegram 配置失败，将使用默认配置", zap.Error(err))
+	}
+	telegramEngine.Start()
+
 	// 初始化路由（后端端口固定 8080，不暴露给宿主机，由 nginx 反向代理）
 	r := router.SetupRouter(&cfg.HTTP)
 
@@ -146,6 +165,9 @@ func main() {
 
 	// 2. 停止所有下载任务（复用取消路径：杀进程 → 清缓存 → 改状态）
 	logic.GetGlobalDownloadLogic().StopAll()
+
+	// 3. 停止 Telegram 下载引擎
+	telegramEngine.Stop()
 
 	// 3. 所有 worker 已完成（或 context 已 cancel），再将 running 任务标记为失败
 	//    （先停调度器再标失败，避免 worker 落定终态覆盖"程序重启"标记）

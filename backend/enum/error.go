@@ -63,6 +63,11 @@ var (
 
 	// 下载相关错误
 	ErrDownloadNotFound = NewBizError(10100001, "下载任务不存在", 404)
+	// Telegram 下载相关错误
+	ErrTelegramNotConfigured = NewBizError(10100002, "Telegram 未配置，请先在设置中填写 api_id 与 api_hash", 400)
+	ErrTelegramNotLoggedIn   = NewBizError(10100003, "Telegram 未登录，请先扫码登录后再下载", 400)
+	ErrTelegramNotReady      = NewBizError(10100004, "Telegram 连接未就绪，请稍后重试", 503)
+	ErrTelegramNotVideo      = NewBizError(10100005, "仅支持下载 Telegram 消息中的视频", 400)
 
 	// 字幕导出相关错误
 	ErrInvalidSubtitleFormat = NewBizError(10080001, "字幕格式参数错误，仅支持 srt/vtt/ass", 400)

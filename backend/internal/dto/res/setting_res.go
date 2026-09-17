@@ -22,4 +22,10 @@ type SettingRes struct {
 	UpscaleDockerImage      string `json:"upscale_docker_image"`
 	UpscaleDevice           string `json:"upscale_device"`
 	UpscaleConcurrency      int    `json:"upscale_concurrency"`
+	TelegramAppID           string `json:"telegram_app_id"`
+	TelegramAppHash         string `json:"telegram_app_hash"`
+	TelegramThreads         int    `json:"telegram_threads"`
+	TelegramDataDir         string `json:"telegram_data_dir"`
+	ProxyURL                string `json:"proxy_url"`
+	ProxyForYtdlp           bool   `json:"proxy_for_ytdlp"`
 }

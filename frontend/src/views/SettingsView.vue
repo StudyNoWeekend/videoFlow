@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 import { useSettingsStore } from '@/stores/settings'
 import type { Setting } from '@/api/setting'
+import { getTelegramStatus, logoutTelegram, type TelegramStatus } from '@/api/telegram'
 import ComponentManager from './ComponentManager.vue'
+import TelegramLoginDialog from '@/components/TelegramLoginDialog.vue'
 
 const { t } = useI18n()
 const settingsStore = useSettingsStore()
@@ -31,14 +33,59 @@ const form = ref<Setting>({
   subtitle_burn_concurrency: 1,
   repair_concurrency: 1,
   scheduler_poll_interval: 2,
+  telegram_app_id: '',
+  telegram_app_hash: '',
+  telegram_threads: 4,
+  telegram_data_dir: 'data/telegram',
+  proxy_url: '',
+  proxy_for_ytdlp: true,
 })
 const saving = ref(false)
+
+// Telegram 登录状态与登录弹窗
+const tgStatus = ref<TelegramStatus>({
+  configured: false,
+  ready: false,
+  authenticated: false,
+  login_status: '',
+})
+const loginDialogVisible = ref(false)
+
+async function loadTelegramStatus(): Promise<void> {
+  try {
+    tgStatus.value = await getTelegramStatus()
+  } catch {
+    // 错误提示已由请求拦截器统一处理
+  }
+}
+
+async function handleLogout(): Promise<void> {
+  try {
+    await ElMessageBox.confirm(t('telegram.login.logout_confirm'), t('common.confirm'), {
+      confirmButtonText: t('common.confirm'),
+      cancelButtonText: t('common.cancel'),
+      type: 'warning',
+    })
+  } catch {
+    return
+  }
+
+  try {
+    await logoutTelegram()
+    ElMessage.success(t('telegram.login.logout_success'))
+    await loadTelegramStatus()
+  } catch {
+    // 错误提示已由请求拦截器统一处理
+  }
+}
 
 async function handleSave(): Promise<void> {
   saving.value = true
   try {
     await settingsStore.saveSettings(form.value)
     ElMessage.success(t('settings.save.success'))
+    // 凭据或代理可能已变化，刷新登录状态
+    await loadTelegramStatus()
   } finally {
     saving.value = false
   }
@@ -47,6 +94,7 @@ async function handleSave(): Promise<void> {
 onMounted(async () => {
   await settingsStore.init()
   form.value = { ...settingsStore.setting }
+  await loadTelegramStatus()
 })
 </script>
 
@@ -88,6 +136,24 @@ onMounted(async () => {
                     <el-input-number v-model="form.scan_interval" :min="1" :max="86400" />
                   </el-form-item>
                 </div>
+              </section>
+
+              <!-- 出站代理 -->
+              <section class="config-section">
+                <div class="section-marker">
+                  <span class="section-marker__line"></span>
+                  <span class="section-marker__label">{{ $t('settings.section.proxy') }}</span>
+                  <span class="section-marker__line"></span>
+                </div>
+                <div class="section-grid section-grid--2">
+                  <el-form-item :label="$t('settings.label.proxy_url')">
+                    <el-input v-model="form.proxy_url" placeholder="socks5://127.0.0.1:1080" />
+                  </el-form-item>
+                  <el-form-item :label="$t('settings.label.proxy_for_ytdlp')">
+                    <el-switch v-model="form.proxy_for_ytdlp" />
+                  </el-form-item>
+                </div>
+                <div class="vf-field-hint proxy-hint">{{ $t('settings.hint.proxy') }}</div>
               </section>
 
               <!-- ASR 配置 -->
@@ -202,6 +268,62 @@ onMounted(async () => {
                 </div>
               </section>
 
+              <!-- Telegram 下载配置 -->
+              <section class="config-section">
+                <div class="section-marker">
+                  <span class="section-marker__line"></span>
+                  <span class="section-marker__label">{{ $t('settings.section.telegram') }}</span>
+                  <span class="section-marker__line"></span>
+                </div>
+                <div class="section-grid section-grid--2">
+                  <el-form-item :label="$t('settings.label.telegram_app_id')">
+                    <el-input v-model="form.telegram_app_id" placeholder="1234567" />
+                  </el-form-item>
+                  <el-form-item :label="$t('settings.label.telegram_app_hash')">
+                    <el-input
+                      v-model="form.telegram_app_hash"
+                      type="password"
+                      show-password
+                      placeholder="0123456789abcdef0123456789abcdef"
+                    />
+                  </el-form-item>
+                  <el-form-item :label="$t('settings.label.telegram_threads')">
+                    <el-slider v-model="form.telegram_threads" :min="1" :max="16" show-input />
+                  </el-form-item>
+                  <el-form-item :label="$t('settings.label.telegram_data_dir')">
+                    <el-input v-model="form.telegram_data_dir" placeholder="data/telegram" />
+                  </el-form-item>
+                </div>
+                <div class="vf-field-hint telegram-hint">{{ $t('settings.hint.telegram') }}</div>
+
+                <!-- 登录状态与入口 -->
+                <div class="telegram-account">
+                  <span
+                    class="vf-led"
+                    :class="tgStatus.authenticated ? 'vf-led--green' : 'vf-led--cyan'"
+                  ></span>
+                  <span class="vf-data-label">
+                    {{
+                      tgStatus.authenticated
+                        ? $t('telegram.login.logged_in_as', { account: tgStatus.account })
+                        : $t('telegram.login.not_logged_in')
+                    }}
+                  </span>
+                  <el-button size="small" type="primary" plain @click="loginDialogVisible = true">
+                    {{ tgStatus.authenticated ? $t('telegram.login.relogin') : $t('telegram.login.action') }}
+                  </el-button>
+                  <el-button
+                    v-if="tgStatus.authenticated"
+                    size="small"
+                    type="danger"
+                    plain
+                    @click="handleLogout"
+                  >
+                    {{ $t('telegram.login.logout') }}
+                  </el-button>
+                </div>
+              </section>
+
               <el-form-item class="form-actions">
                 <el-button type="primary" size="large" :loading="saving" @click="handleSave">
                   <el-icon><Check /></el-icon>{{ $t('settings.save') }}
@@ -219,6 +341,8 @@ onMounted(async () => {
         </el-tab-pane>
       </el-tabs>
     </div>
+
+    <TelegramLoginDialog v-model="loginDialogVisible" @success="loadTelegramStatus" />
   </div>
 </template>
 
@@ -407,6 +531,28 @@ onMounted(async () => {
   color: var(--vf-text-muted);
   line-height: 1.4;
   margin-top: 4px;
+}
+
+.telegram-hint {
+  max-width: 720px;
+  margin-bottom: 12px;
+  line-height: 1.6;
+}
+
+.proxy-hint {
+  max-width: 720px;
+  line-height: 1.6;
+}
+
+.telegram-account {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border: 1px solid var(--vf-border-light);
+  border-radius: var(--vf-radius-sm);
+  background: var(--vf-bg-elevated);
 }
 
 .option-with-desc {

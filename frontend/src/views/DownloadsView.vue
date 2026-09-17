@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, h } from 'vue'
+import { ref, computed, onMounted, onUnmounted, h } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 import { createDownload, listDownloads, cancelDownload, deleteDownload } from '@/api/download'
-import type { Download, DownloadStatus } from '@/api/download'
+import type { Download, DownloadStatus, DownloadPlatform } from '@/api/download'
+import { getTelegramStatus } from '@/api/telegram'
+import TelegramLoginDialog from '@/components/TelegramLoginDialog.vue'
 import { formatFileSize, formatSpeed } from '@/utils/format'
 import { useResponsive } from '@/composables/useResponsive'
 import { useSettingsStore } from '@/stores/settings'
@@ -16,7 +18,6 @@ const settingsStore = useSettingsStore()
 // 搜索引擎状态
 const urlInput = ref<string>('')
 const searching = ref<boolean>(false)
-const hasSubmitted = ref<boolean>(false)
 const overwrite = ref<boolean>(false) // 文件冲突时覆盖还是自动重命名
 const downloadDirMode = ref<'video' | 'output'>('video') // 下载路径：video=本地视频目录, output=输出目录
 
@@ -29,6 +30,11 @@ const pageSize = ref<number>(10)
 // 排序状态（空串表示默认排序：创建时间倒序）
 const sortBy = ref<string>('')
 const sortOrder = ref<'asc' | 'desc' | ''>('')
+
+// 是否展示"已提交态"（顶部搜索栏 + 下载历史面板）。
+// 由数据推导而非一次性标志位：存在下载记录或活跃下载时才展示，
+// 后端返回空列表时自动回到初始搜索页。
+const hasSubmitted = computed<boolean>(() => total.value > 0 || downloadingList.value.length > 0)
 
 let pollTimer: number | null = null
 
@@ -46,6 +52,8 @@ function statusLedClass(status: DownloadStatus): string {
 
 // 状态文本
 function statusText(status: DownloadStatus): string {
+  // el-table-column 注册列时会用 { row: {} } 试渲染一次默认插槽，此时 status 为空
+  if (!status) return '- -'
   const key = `downloads.status.${status}`
   const text = t(key)
   return text
@@ -56,10 +64,47 @@ function isValidUrl(url: string): boolean {
   return url.trim().length > 0 && url.includes('://')
 }
 
+// 判断是否为 Telegram 消息链接，与后端 DetectPlatform 的判定保持一致
+function isTelegramUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url)
+    if (parsed.protocol === 'tg:') {
+      return true
+    }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return false
+    }
+    return ['t.me', 'telegram.me', 'telegram.dog', 'tx.me'].includes(parsed.hostname.toLowerCase())
+  } catch {
+    return false
+  }
+}
+
+// 平台展示名
+function platformLabel(platform: DownloadPlatform): string {
+  return platform === 'telegram' ? 'Telegram' : 'yt-dlp'
+}
+
+// Telegram 登录弹窗：未登录时拦截提交，登录成功后自动继续
+const loginDialogVisible = ref<boolean>(false)
+const pendingUrl = ref<string>('')
+
+async function handleTelegramLoginSuccess(): Promise<void> {
+  const pending = pendingUrl.value
+  pendingUrl.value = ''
+  if (!pending) {
+    return
+  }
+  // 登录完成后自动提交此前被拦截的链接
+  urlInput.value = pending
+  await handleSubmit()
+}
+
 // 支持的平台列表
 const supportedPlatforms = [
   { name: 'YouTube', icon: 'youtube' },
   { name: 'Bilibili', icon: 'bilibili' },
+  { name: 'Telegram', icon: 'telegram' },
   { name: 'Twitter/X', icon: 'twitter' },
   { name: 'Instagram', icon: 'instagram' },
   { name: 'TikTok', icon: 'tiktok' },
@@ -84,8 +129,21 @@ async function handleSubmit(): Promise<void> {
     return
   }
 
+  // Telegram 链接需要账号已登录，未登录时先引导扫码
+  if (isTelegramUrl(url)) {
+    try {
+      const status = await getTelegramStatus()
+      if (!status.authenticated) {
+        pendingUrl.value = url
+        loginDialogVisible.value = true
+        return
+      }
+    } catch {
+      return
+    }
+  }
+
   searching.value = true
-  hasSubmitted.value = true
 
   try {
     // 根据选择的目录模式确定下载路径
@@ -96,6 +154,7 @@ async function handleSubmit(): Promise<void> {
       downloadDir = settingsStore.setting.output_dir || undefined
     }
     const dl = await createDownload(url, overwrite.value, downloadDir)
+    // 创建成功后才切到已提交态（由 hasSubmitted 计算属性推导），创建失败则留在初始搜索页
     downloadingList.value.unshift(dl)
     urlInput.value = ''
     // 开始轮询
@@ -169,6 +228,10 @@ async function handleDelete(id: string): Promise<void> {
     downloadingList.value = downloadingList.value.filter((d) => d.id !== id)
     historyList.value = historyList.value.filter((d) => d.id !== id)
     total.value--
+    // 已无活跃下载时停止轮询；若记录被清空，hasSubmitted 会自动回到初始搜索页
+    if (downloadingList.value.length === 0) {
+      stopPolling()
+    }
     ElMessage.success(t('downloads.delete_success'))
   } catch {
     // cancelled
@@ -212,21 +275,19 @@ function stopPolling(): void {
 }
 
 onMounted(async () => {
-		  // 加载设置（获取视频目录和输出目录路径）
-		  try {
-		    await settingsStore.loadSettings()
-		  } catch {
-		    // ignore
-		  }
-		  await loadDownloads()
-		  // 只在有下载记录时切换到已提交视图，否则展示初始搜索页
-		  if (total.value > 0) {
-		    hasSubmitted.value = true
-		  }
-		  if (total.value > 0 && downloadingList.value.length > 0) {
-		    startPolling()
-		  }
-		})
+  // 加载设置（获取视频目录和输出目录路径）
+  try {
+    await settingsStore.loadSettings()
+  } catch {
+    // ignore
+  }
+  // 是否展示已提交态由 hasSubmitted 计算属性根据列表数据自动推导：
+  // 后端返回空列表时保持初始搜索页
+  await loadDownloads()
+  if (total.value > 0 && downloadingList.value.length > 0) {
+    startPolling()
+  }
+})
 
 onUnmounted(() => {
   stopPolling()
@@ -404,7 +465,10 @@ function handleSizeChange(size: number): void {
           >
             <div class="card-header">
               <div class="card-info">
-                <div class="card-title" :title="dl.title || dl.url">{{ dl.title || dl.url }}</div>
+                <div class="card-title" :title="dl.title || dl.url">
+                  <span v-if="dl.platform === 'telegram'" class="platform-badge">{{ platformLabel(dl.platform) }}</span>
+                  {{ dl.title || dl.url }}
+                </div>
                 <div class="card-url">{{ dl.url }}</div>
               </div>
               <div class="card-status">
@@ -477,7 +541,10 @@ function handleSizeChange(size: number): void {
             <el-table-column prop="title" :label="$t('downloads.column.title')" min-width="180">
               <template #default="{ row }">
                 <div class="cell-title">
-                  <span class="title-text">{{ row.title || '- -' }}</span>
+                  <span class="title-text">
+                    <span v-if="row.platform === 'telegram'" class="platform-badge">{{ platformLabel(row.platform) }}</span>
+                    {{ row.title || '- -' }}
+                  </span>
                   <span class="title-url">{{ row.url }}</span>
                 </div>
               </template>
@@ -549,7 +616,10 @@ function handleSizeChange(size: number): void {
             <div v-for="dl in historyList" :key="dl.id" class="history-card">
               <div class="history-card__top">
                 <div class="history-card__info">
-                  <div class="history-card__title" :title="dl.title || dl.url">{{ dl.title || dl.url }}</div>
+                  <div class="history-card__title" :title="dl.title || dl.url">
+                    <span v-if="dl.platform === 'telegram'" class="platform-badge">{{ platformLabel(dl.platform) }}</span>
+                    {{ dl.title || dl.url }}
+                  </div>
                   <div class="history-card__url">{{ dl.url }}</div>
                 </div>
                 <span :class="statusLedClass(dl.status)"></span>
@@ -596,6 +666,9 @@ function handleSizeChange(size: number): void {
         </div>
       </div>
     </template>
+
+    <!-- Telegram 登录弹窗：提交 t.me 链接且未登录时弹出 -->
+    <TelegramLoginDialog v-model="loginDialogVisible" @success="handleTelegramLoginSuccess" />
   </div>
 </template>
 
@@ -1241,5 +1314,20 @@ function handleSizeChange(size: number): void {
   display: flex;
   gap: 4px;
   flex-wrap: wrap;
+}
+
+/* 平台标识：仅 Telegram 显示，用于区分内置 MTProto 下载与 yt-dlp 下载 */
+.platform-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  margin-right: 6px;
+  font-family: var(--vf-font-mono);
+  font-size: 10px;
+  color: var(--vf-accent);
+  background: var(--vf-accent-soft);
+  border: 1px solid var(--vf-accent-border);
+  border-radius: var(--vf-radius-sm);
+  vertical-align: middle;
 }
 </style>

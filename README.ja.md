@@ -238,6 +238,16 @@ repair:
 concurrency:
   subtitle: 2
   repair: 1
+proxy:
+  url: ""                         # グローバル外向きプロキシ。Telegram と yt-dlp で共有。空欄は直接接続
+  use_for_ytdlp: true             # yt-dlp がプロキシを使うか（グローバルモード時はオフ推奨）
+telegram:
+  app_id: 0                       # my.telegram.org で取得。空欄の場合 Telegram ダウンロードは無効
+  app_hash: ""
+  data_dir: data/telegram         # セッションディレクトリ（認証キーを含むため厳重に管理）
+  threads: 4                      # ファイルごとの並列数
+  pool_size: 4                    # DC ごとの接続プールサイズ
+  reconnect_timeout: 300          # 再接続バックオフ上限（秒）
 ```
 
 </details>
@@ -444,6 +454,22 @@ videoFlow/
 
 </details>
 
+<details>
+<summary><b>Telegram ダウンロード</b></summary>
+
+ダウンロードページで `t.me` のメッセージリンクを貼り付けると、yt-dlp ではなく内蔵の MTProto クライアントで処理されます（公開チャンネル、非公開の `t.me/c/` リンク、トピック・コメントリンクに対応）。
+
+有効化手順：
+
+1. [my.telegram.org](https://my.telegram.org) -> API development tools で `api_id` と `api_hash` を取得
+2. 「システム設定 → Telegram ダウンロード」に api_id / api_hash を入力。Telegram が遮断されている地域では、**「外向きプロキシ」**セクションに `socks5://127.0.0.1:1080` などのプロキシも設定して保存
+3. `t.me` リンクを貼り付けると QR コードが表示されるので、スマートフォンの Telegram で読み取る（二段階認証が有効な場合はパスワード入力あり）
+
+ログインセッションは `data/telegram/` に保存され、再起動後も維持されます。
+
+**アカウントのリスク**：制限付きチャンネルをダウンロードするには*ユーザーアカウント*でのログインが必要です。ご自身の api_id/api_hash を使用し、`threads` を上げすぎず、多数の端末で同時ログインしないでください。`data/telegram/session.json` には認証キーが含まれるため、認証情報として扱い、絶対にコミットしないでください。
+
+</details>
 ## 🗺️ Roadmap
 
 **✅ 実装済み**
@@ -476,7 +502,9 @@ videoFlow/
 
 ## 📜 ライセンス
 
-[MIT License](./LICENSE) - 自由に使用、改変、配布できます。著作権表示を残すだけで構いません。
+本プロジェクト自体のコードは [MIT License](./LICENSE) で公開しています。
+
+⚠️ **注意**：Telegram ダウンロード機能が依存する [iyear/tdl](https://github.com/iyear/tdl) の core モジュールは **AGPL-3.0** でライセンスされています。AGPL のコピーレフト条項により、当該機能を含む状態で本プログラムを配布する（またはネットワークサービスとして提供する）場合は AGPL-3.0 に従い、ソースコードを提供する必要があります。これを回避する場合は `internal/telegram` モデルとその依存を削除してください。他の機能には影響しません。
 
 ---
 
