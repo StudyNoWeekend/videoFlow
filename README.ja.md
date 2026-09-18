@@ -37,6 +37,8 @@ Whisper や FFmpeg を単体で使うのは難しくありませんが、「デ�
 | タスク管理 | 自分で記録、ターミナルを閉じたら消える | タスクリスト + リアルタイム進捗 + 失敗リトライ + 履歴確認 |
 | 並行制御 | キュー / セマフォを自前実装 | スケジューラが設定された並行数に従って自動スケジュール |
 | 設定変更 | 設定ファイルを編集、サービスを再起動 | オンラインで変更、保存すると即座にホット反映、データベースに永続化 |
+| 動画ダウンロード | yt-dlp やブラウザ拡張を自分で探し、ダウンロード先もバラバラ | 内蔵のダウンロード管理。URL を貼るだけでダウンロードし、自動で動画ライブラリに登録 |
+| Telegram ダウンロード | tdl / Telegram Desktop を入れて CLI 引数を覚える必要がある | `t.me` リンクを貼ると自動判別。ブラウザで QR ログインし、通常のダウンロードと同じ進捗・取り込みフローを共有 |
 | デプロイ形態 | 多くの依存パッケージをインストール | Docker シングルイメージ、設定をマウントするだけで実行 |
 
 基盤として [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice) の認識能力、[FFmpeg](https://ffmpeg.org/) の音声/動画処理、[`ladaapp/lada`](https://github.com/ladaapp/lada) のモザイク除去を再利用し、その上に HTTP API と Web フロントエンドをラップしています -- **コマンドラインの能力を、グラフィカル UI の体験で**。
@@ -51,11 +53,16 @@ Whisper や FFmpeg を単体で使うのは難しくありませんが、「デ�
 | **NAS / ホームサーバー愛好家** | Docker で常時稼働させ、定期スキャンでディレクトリを自動取り込み、新規動画に自動で字幕を生成 |
 | **Whisper をローカルで動かしたい方** | スクリプトを書かずに、Web UI で ASR パラメータ（言語 / VAD / プロンプト）を設定するだけ |
 | **コマンドラインが面倒な方** | すべてグラフィカル UI で、設定、スキャン、タスク進捗がひと目で分かる |
+| **ネットから動画を落とす人** | yt-dlp 内蔵のダウンロード管理。URL を貼るだけでダウンロードし、進捗をリアルタイム表示、完了後は自動で動画ライブラリに登録 |
+| **Telegram チャンネルをよく見る人** | `t.me` のメッセージリンクを貼るだけでダウンロード。非公開チャンネルやトピック / コメントリンクにも対応し、ブラウザで QR ログインできるため CLI ツールのインストールは不要 |
 | **ローカルユーザー** | インストール済みの ffmpeg を自動的にインテリジェントに呼び出し、追加設定は不要 |
 
 ## ✨ 機能特性
 
 - **入力 / 出力ディレクトリの分離** - 入力ディレクトリをスキャンして自動取り込み。タスクの成果物（字幕 / 焼き込み動画 / モザイク除去 / 高画質化動画）は設定可能な出力ディレクトリに出力され、タスクの状態は動画レコードの状態フィールドを基準に、タスクのライフサイクルでリアルタイムに同期
+- **動画ダウンロード** - yt-dlp ベースの内蔵ダウンロード管理。YouTube / Bilibili / Twitter / Instagram / TikTok / Facebook / Twitch / Vimeo / Niconico / Dailymotion / Reddit / Tumblr に対応し、URL を貼るだけでダウンロード、進捗はリアルタイム表示、完了後は自動で動画ライブラリに登録
+- **Telegram ダウンロード** - 内蔵 MTProto クライアント。`t.me` のメッセージリンクを貼ると自動的に Telegram 経由で処理され、公開チャンネル、非公開の `t.me/c/` リンク、トピック・コメントリンクに対応。ブラウザ上で QR ログインでき、CLI ツールのインストールは不要
+- **グローバル外向きプロキシ** - Telegram と yt-dlp で共有（yt-dlp は個別にオフ可）。socks5 / socks5h / http / https に対応
 - **字幕生成** - Whisper ASR ベース、言語、VAD フィルタ、タスクタイプ、音声の事前エンコード、初期プロンプト、単語レベルのタイムスタンプ、複数の出力形式（json / srt / vtt / txt / tsv）に対応
 - **モザイク除去** - Docker イメージ `ladaapp/lada` ベース、x86_64 CPU および NVIDIA CUDA GPU（Turing シリーズ以降、RTX 20xx ～ RTX 50xx シリーズ）に対応。CUDA デバイスは自動でコンテナに透過（`--gpus`）、GPU 障害の原因を自動的にヒント表示
 - **高画質化** - Video2X（`ghcr.io/k4yt3x/video2x:latest`）で動画をより高解像度にアップスケール、Real-ESRGAN / Real-CUGAN / libplacebo プロセッサに対応。ターゲット解像度とノイズ軽減レベルはタスクごとに指定
@@ -138,13 +145,19 @@ docker run -d --name videoflow \
   video-captions:latest
 ```
 
-Dockerfile はマルチステージビルドです：`golang:1.25-alpine` でコンパイル（CGO）し、`alpine:3.20` で実行（ffmpeg 内蔵）します。`linux/amd64` と `linux/arm64` の両方に対応しています。
+Dockerfile はマルチステージビルドです：`golang:1.26-alpine` でコンパイル（CGO。1.26 は tdl/core が要求する Go 1.25.8 以上を満たすため）し、`alpine:3.20` で実行（ffmpeg 内蔵）します。
+
+ベースイメージは既定で Huawei Cloud ミラー（中国国内では高速）を使用しますが、このミラーは amd64 のみを提供しています。**Apple Silicon などの arm64 環境**では公式のマルチアーキテクチャイメージを使ってネイティブにビルドすることを推奨します。そうしないとコンテナ全体が QEMU エミュレーションで動作し、ffmpeg などの CPU 負荷の高い処理が大幅に遅くなります：
+
+```bash
+docker build --build-arg BASE_REGISTRY=docker.io/library -t video-captions:latest -f Dockerfile .
+```
 
 </details>
 
 ### 方法 3：ローカル開発デプロイ
 
-**前提条件：** Go 1.25+、Node.js 22.18+、FFmpeg、および [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice) が稼働していること。
+**前提条件：** Go 1.25.8+（Telegram で使用する tdl/core の要件）、Node.js 22.18+、FFmpeg、および [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice) が稼働していること。
 
 ```bash
 # 后端
@@ -190,6 +203,8 @@ APP_HTTP_PORT=9090 go run ./cmd/api   # 后端
 | 音声/動画 | [FFmpeg](https://ffmpeg.org/) / ffprobe | 音声抽出、再生時間の検出、スマートローカル呼び出し |
 | モザイク除去 | [`ladaapp/lada`](https://github.com/ladaapp/lada) | Docker モザイク除去エンジン |
 | 高画質化 | [Video2X](https://github.com/k4yt3x/video2x) | Docker 高画質化エンジン |
+| 動画ダウンロード | [yt-dlp](https://github.com/yt-dlp/yt-dlp) | オンライン動画ダウンロードエンジン |
+| Telegram ダウンロード | [iyear/tdl](https://github.com/iyear/tdl) core（[gotd/td](https://github.com/gotd/td) ベース） | MTProto クライアント / DC プール / マルチスレッドダウンローダ。外部バイナリ不要 |
 | フロントエンド | [Vue 3](https://vuejs.org/) + [Element Plus](https://element-plus.org/) + [Vite](https://vite.dev/) | グラフィカル UI |
 | 状態管理 | [Pinia](https://pinia.vuejs.org/) | フロントエンドの状態 |
 | HTTP クライアント | [Axios](https://axios-http.com/) | API リクエスト |
@@ -394,6 +409,9 @@ videoFlow/
 │   │   ├── model/            # データモデルと永続化（GORM）
 │   │   ├── dto/              # リクエスト/レスポンス DTO
 │   │   ├── router/           # ルーティング登録
+│   │   ├── middleware/       # JWT 認証ミドルウェア
+│   │   ├── telegram/         # Telegram ダウンロード（tdl core：ログイン / リンク解析 / ダウンロード）
+│   │   ├── component/        # コンポーネント検出・インストール（Docker / FFmpeg / ASR / yt-dlp）
 │   │   ├── asr/              # ASR クライアント
 │   │   ├── ffmpeg/           # FFmpeg ローカル実行器
 │   │   ├── repair/           # モザイク除去実行器
@@ -474,6 +492,9 @@ videoFlow/
 
 **✅ 実装済み**
 
+- 動画ダウンロード（yt-dlp 内蔵管理：YouTube / Bilibili / Twitter / TikTok / Twitch など、進捗リアルタイム表示、自動取り込み）
+- Telegram ダウンロード（内蔵 MTProto クライアント：`t.me` リンクを貼るだけ、非公開チャンネル / トピック / コメントリンク対応、ブラウザで QR ログイン）
+- グローバル外向きプロキシ（Telegram と yt-dlp で共有、yt-dlp は個別にオフ可）
 - 動画スキャン（手動 / 定期自動）+ 字幕生成（Whisper ASR）
 - モザイク除去（lada）+ 高画質化（Video2X）
 - 字幕ファイルの動画への書き込み（焼き込み）

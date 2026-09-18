@@ -37,6 +37,8 @@ Using Whisper or FFmpeg alone isn't hard, but chaining "scan directory -> extrac
 | Task management | Track it yourself; gone when you close the terminal | Task list + real-time progress + failure retry + searchable history |
 | Concurrency control | Write your own queue / semaphore | Scheduler dispatches by configured concurrency |
 | Configuration changes | Edit config file, restart service | Edit online, hot-reload on save, persisted to database |
+| Video download | Hunt for yt-dlp / browser extensions, downloads scattered everywhere | Built-in download manager: paste a URL and it downloads, then imports into the video library automatically |
+| Telegram download | Install tdl / Telegram Desktop and memorise CLI flags | Paste a `t.me` link and it is recognised automatically; QR sign-in in the browser, sharing the same progress and import flow as regular downloads |
 | Deployment | A pile of dependencies to install | Single Docker image, mount config and run |
 
 Under the hood it reuses the recognition power of [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice), the audio/video processing of [FFmpeg](https://ffmpeg.org/), and the deblur capability of [`ladaapp/lada`](https://github.com/ladaapp/lada), wrapping them with an HTTP API and Web frontend -- **the power of the command line, the experience of a graphical UI**.
@@ -51,11 +53,16 @@ Under the hood it reuses the recognition power of [Whisper ASR Webservice](https
 | **NAS / home server enthusiasts** | Keep Docker running long-term, periodically scan directories to auto-import, and auto-generate subtitles for new videos |
 | **People who want to run Whisper locally** | No scripts needed—configure ASR parameters (language / VAD / prompt) via the Web UI |
 | **People who find the CLI cumbersome** | Fully graphical—config, scanning, and task progress at a glance |
+| **People who download videos** | Built-in yt-dlp manager: paste a URL and it downloads, with real-time progress and automatic import into the video library |
+| **Frequent Telegram channel visitors** | Paste a `t.me` message link and it downloads; private channels plus topic / comment links are supported, with QR sign-in in the browser and no CLI tools to install |
 | **Local users** | ffmpeg is automatically and intelligently called from your local installation, no extra configuration needed |
 
 ## ✨ Features
 
 - **Separate input / output directories** - Scans the input directory and imports videos automatically; task artifacts (subtitles / burned videos / deblurred / upscaled videos) are output to a configurable output directory, and task status is tracked in the video record, kept in sync by the task lifecycle
+- **Video download** - Built-in download manager based on yt-dlp, supporting YouTube / Bilibili / Twitter / Instagram / TikTok / Facebook / Twitch / Vimeo / Niconico / Dailymotion / Reddit / Tumblr; paste a URL and it downloads, with real-time progress and automatic import into the video library
+- **Telegram download** - Built-in MTProto client: paste a `t.me` message link and it is routed to Telegram automatically, supporting public channels, private `t.me/c/` links, topic and comment links; QR sign-in in the browser, no CLI tools required
+- **Global outbound proxy** - Shared by Telegram and yt-dlp (yt-dlp can opt out), supporting socks5 / socks5h / http / https
 - **Subtitle generation** - Based on Whisper ASR, supports language, VAD filter, task type, audio pre-encoding, initial prompt, word-level timestamps, and multiple output formats (json / srt / vtt / txt / tsv)
 - **Deblur** - Based on the `ladaapp/lada` Docker image, supports x86_64 CPU and NVIDIA CUDA GPUs (Turing series or higher, RTX 20xx to RTX 50xx). CUDA devices are passed through automatically (`--gpus`), with auto hints on GPU failure causes
 - **Video upscaling** - Uses Video2X (`ghcr.io/k4yt3x/video2x:latest`) to upgrade videos to a higher resolution, with Real-ESRGAN / Real-CUGAN / libplacebo processors; target resolution and denoise level are set per task
@@ -138,13 +145,19 @@ docker run -d --name videoflow \
   video-captions:latest
 ```
 
-The Dockerfile uses a multi-stage build: `golang:1.25-alpine` for compilation (CGO) + `alpine:3.20` for runtime (with ffmpeg built in). Supports both `linux/amd64` and `linux/arm64`.
+The Dockerfile uses a multi-stage build: `golang:1.26-alpine` for compilation (CGO; 1.26 satisfies the Go 1.25.8+ requirement of tdl/core) + `alpine:3.20` for runtime (with ffmpeg built in).
+
+Base images come from a Huawei Cloud mirror by default (faster inside China), but that mirror only serves amd64. On **arm64 machines such as Apple Silicon**, build against the official multi-arch images so the image runs natively instead of under QEMU emulation (ffmpeg and other CPU-heavy work is much slower when emulated):
+
+```bash
+docker build --build-arg BASE_REGISTRY=docker.io/library -t video-captions:latest -f Dockerfile .
+```
 
 </details>
 
 ### Option 3: Local development setup
 
-**Prerequisites:** Go 1.25+, Node.js 22.18+, FFmpeg, and a running [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice).
+**Prerequisites:** Go 1.25.8+ (required by tdl/core, used for Telegram), Node.js 22.18+, FFmpeg, and a running [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice).
 
 ```bash
 # Backend
@@ -190,6 +203,8 @@ Open the local address Vite prints in your browser.
 | Audio/Video | [FFmpeg](https://ffmpeg.org/) / ffprobe | Audio extraction, duration probing, local / SSH |
 | Deblur | [`ladaapp/lada`](https://github.com/ladaapp/lada) | Docker deblur engine |
 | Video upscaling | [Video2X](https://github.com/k4yt3x/video2x) | Docker upscaling engine |
+| Video download | [yt-dlp](https://github.com/yt-dlp/yt-dlp) | Online video download engine |
+| Telegram download | [iyear/tdl](https://github.com/iyear/tdl) core (on top of [gotd/td](https://github.com/gotd/td)) | MTProto client / DC pool / multi-threaded downloader, no external binary |
 | Frontend | [Vue 3](https://vuejs.org/) + [Element Plus](https://element-plus.org/) + [Vite](https://vite.dev/) | Graphical UI |
 | State management | [Pinia](https://pinia.vuejs.org/) | Frontend state |
 | HTTP client | [Axios](https://axios-http.com/) | API requests |
@@ -394,6 +409,9 @@ videoFlow/
 │   │   ├── model/            # Data models and persistence (GORM)
 │   │   ├── dto/              # Request/response DTOs
 │   │   ├── router/           # Route registration
+│   │   ├── middleware/       # JWT auth middleware
+│   │   ├── telegram/         # Telegram download (tdl core: login / link parsing / download)
+│   │   ├── component/        # Component detection & install (Docker / FFmpeg / ASR / yt-dlp)
 │   │   ├── asr/              # ASR client
 │   │   ├── ffmpeg/           # FFmpeg local executor
 │   │   ├── repair/           # Deblur executor
@@ -474,6 +492,9 @@ The login session is persisted under `data/telegram/` and survives restarts.
 
 **✅ Implemented**
 
+- Video download (yt-dlp built-in manager: YouTube / Bilibili / Twitter / TikTok / Twitch and more, real-time progress, auto import)
+- Telegram download (built-in MTProto client: paste a `t.me` link, private channels / topics / comment links, QR sign-in in the browser)
+- Global outbound proxy (shared by Telegram and yt-dlp, with an opt-out switch for yt-dlp)
 - Video scanning (manual / scheduled) + subtitle generation (Whisper ASR)
 - Deblur (lada) + video upscaling (Video2X)
 - Subtitle burn-in (writing subtitles into the video)

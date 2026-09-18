@@ -37,6 +37,8 @@
 | 任務管理 | 自己記，關掉終端機就沒了 | 任務清單 + 即時進度 + 失敗重試 + 歷史可查 |
 | 並行控制 | 自己寫佇列 / 號誌 | 排程器按設定並行數自動排程 |
 | 設定修改 | 改設定檔、重啟服務 | 線上修改，儲存即熱生效，持久化到資料庫 |
+| 影片下載 | 自己找 yt-dlp / 瀏覽器外掛，下載散落各處 | 內建下載管理，貼上連結即下，自動入庫到影片列表 |
+| Telegram 下載 | 得裝 tdl / Telegram Desktop，命令列參數記不住 | 貼上 `t.me` 連結自動識別，網頁掃碼登入，與一般下載共用進度與入庫流程 |
 | 部署形態 | 一堆相依套件要裝 | Docker 單映像，掛載設定即跑 |
 
 底層復用 [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice) 的辨識能力、[FFmpeg](https://ffmpeg.org/) 的音訊/影片處理、[`ladaapp/lada`](https://github.com/ladaapp/lada) 的去馬賽克，在其之上封裝出 HTTP API 與 Web 前端 -- **命令列的能力，圖形介面的體驗**。
@@ -51,11 +53,16 @@
 | **NAS / 家庭伺服器玩家** | Docker 長期掛著，定時掃描目錄自動入庫，新影片自動產生字幕 |
 | **想本地跑 Whisper 的人** | 不想寫腳本，Web 介面設定 ASR 參數（語言 / VAD / 提示詞）即可 |
 | **嫌命令列麻煩的人** | 全程圖形介面，設定、掃描、任務進度一目了然 |
+| **從網路下載影片的人** | 內建 yt-dlp 下載管理，貼上連結即下載，進度即時追蹤，完成後自動入庫到影片列表 |
+| **常逛 Telegram 頻道的人** | 貼上 `t.me` 訊息連結即下，支援私有頻道與話題 / 留言區連結，網頁掃碼登入，無需額外安裝命令列工具 |
 | **本地化執行** | ffmpeg 自動智慧呼叫本地已安裝的 ffmpeg，無需額外配置 |
 
 ## ✨ 功能特性
 
 - **輸入 / 輸出目錄分離** - 掃描輸入目錄自動入庫；任務產物（字幕 / 燒錄影片 / 去馬賽克 / 清晰度修復影片）統一輸出到可設定的輸出目錄，任務狀態以影片記錄的狀態欄位為準、由任務生命週期即時同步
+- **影片下載** - 基於 yt-dlp 的內建下載管理，支援 YouTube / Bilibili / Twitter / Instagram / TikTok / Facebook / Twitch / Vimeo / Niconico / Dailymotion / Reddit / Tumblr，貼上連結即下載，進度即時追蹤，完成後自動入庫到影片列表
+- **Telegram 下載** - 內建 MTProto 用戶端，貼上 `t.me` 訊息連結會自動改走 Telegram 通道，支援公開頻道、私有 `t.me/c/` 連結、話題與留言區連結；網頁掃碼登入，無需額外安裝命令列工具
+- **全域出站代理** - Telegram 與 yt-dlp 共用（yt-dlp 可單獨關閉），支援 socks5 / socks5h / http / https
 - **字幕產生** - 基於 Whisper ASR，支援語言、VAD 過濾、任務類型、音訊預編碼、初始提示詞、詞級時間戳、多種輸出格式（json / srt / vtt / txt / tsv）
 - **去馬賽克** - 基於 Docker 映像 `ladaapp/lada`，支援 x86_64 CPU 以及 NVIDIA CUDA 顯示卡（Turing 系列或更高版本，包括 RTX 20xx 到 RTX 50xx 系列），CUDA 設備自動透傳（`--gpus`）、GPU 故障原因自動提示
 - **清晰度增強** - 基於 Video2X（`ghcr.io/k4yt3x/video2x:latest`）將影片升級到更高解析度，支援 Real-ESRGAN / Real-CUGAN / libplacebo 處理器，目標解析度與降噪等級按任務指定
@@ -134,13 +141,19 @@ docker run -d --name videoflow \
   video-captions:latest
 ```
 
-Dockerfile 為多階段建置：`golang:1.25-alpine` 跨譯（CGO）+ `alpine:3.20` 執行（內建 ffmpeg）。支援 `linux/amd64` 和 `linux/arm64` 雙架構。
+Dockerfile 為多階段建置：`golang:1.26-alpine` 編譯（CGO；1.26 是為了滿足 tdl/core 對 Go 1.25.8+ 的要求）+ `alpine:3.20` 執行（內建 ffmpeg）。
+
+基礎映像預設走華為雲鏡像源（國內建置較快），但該源只提供 amd64。**Apple Silicon 等 arm64 機器**建議改用官方多架構映像，建置原生 arm64 映像，否則整個容器會在 QEMU 模擬下執行（ffmpeg 等 CPU 密集操作會明顯變慢）：
+
+```bash
+docker build --build-arg BASE_REGISTRY=docker.io/library -t video-captions:latest -f Dockerfile .
+```
 
 </details>
 
 ### 方式三：本地開發部署
 
-**前置要求：** Go 1.25+、Node.js 22.18+、FFmpeg，並已執行 [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice)。
+**前置要求：** Go 1.25.8+（Telegram 依賴的 tdl/core 要求）、Node.js 22.18+、FFmpeg，並已執行 [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice)。
 
 ```bash
 # 後端
@@ -186,6 +199,8 @@ APP_HTTP_PORT=9090 go run ./cmd/api   # 後端
 | 音訊/影片 | [FFmpeg](https://ffmpeg.org/) / ffprobe | 音訊擷取、時長探測，智慧本地呼叫 |
 | 去馬賽克 | [`ladaapp/lada`](https://github.com/ladaapp/lada) | Docker 去馬賽克引擎 |
 | 清晰度增強 | [Video2X](https://github.com/k4yt3x/video2x) | Docker 清晰度增強引擎 |
+| 影片下載 | [yt-dlp](https://github.com/yt-dlp/yt-dlp) | 線上影片下載引擎 |
+| Telegram 下載 | [iyear/tdl](https://github.com/iyear/tdl) core（基於 [gotd/td](https://github.com/gotd/td)） | MTProto 用戶端 / DC 連線池 / 多執行緒下載引擎，無需外部執行檔 |
 | 前端 | [Vue 3](https://vuejs.org/) + [Element Plus](https://element-plus.org/) + [Vite](https://vite.dev/) | 圖形介面 |
 | 狀態管理 | [Pinia](https://pinia.vuejs.org/) | 前端狀態 |
 | HTTP 客戶端 | [Axios](https://axios-http.com/) | 介面請求 |
@@ -390,6 +405,9 @@ videoFlow/
 │   │   ├── model/            # 資料模型與持久化（GORM）
 │   │   ├── dto/              # 請求/回應 DTO
 │   │   ├── router/           # 路由註冊
+│   │   ├── middleware/       # JWT 鑑權中介軟體
+│   │   ├── telegram/         # Telegram 下載（基於 tdl core：登入 / 連結解析 / 下載）
+│   │   ├── component/        # 元件偵測與安裝（Docker / FFmpeg / ASR / yt-dlp 等）
 │   │   ├── asr/              # ASR 客戶端
 │   │   ├── ffmpeg/           # FFmpeg 本地/SSH 執行器
 │   │   ├── repair/           # 去馬賽克執行器
@@ -470,6 +488,9 @@ videoFlow/
 
 **✅ 已實作**
 
+- 影片下載（yt-dlp 內建管理：YouTube / Bilibili / Twitter / TikTok / Twitch 等，進度即時追蹤，自動入庫）
+- Telegram 下載（內建 MTProto 用戶端：貼上 `t.me` 連結即下，支援私有頻道 / 話題 / 留言區連結，網頁掃碼登入）
+- 全域出站代理（Telegram 與 yt-dlp 共用，yt-dlp 可單獨關閉）
 - 影片掃描（手動 / 定時自動）+ 字幕產生（Whisper ASR）
 - 去馬賽克（lada）+ 清晰度增強（Video2X）
 - 字幕寫入影片（燒錄）

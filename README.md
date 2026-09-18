@@ -31,7 +31,7 @@
 
 ## 💡 项目亮点
 
-本项目最大的亮点是：**把 Whisper 语音识别、FFmpeg 音频处理、yt-dlp 视频下载、Docker 去马赛克、清晰度增强这五件本来要拼脚本才能串起来的事，整合成了一套开箱即用的 Web 可视化管理平台**。
+本项目最大的亮点是：**把 Whisper 语音识别、FFmpeg 音频处理、yt-dlp / Telegram 视频下载、Docker 去马赛克、清晰度增强这五件本来要拼脚本才能串起来的事，整合成了一套开箱即用的 Web 可视化管理平台**。
 
 单独用 Whisper / FFmpeg / yt-dlp 并不难，但要把「扫描目录 -> 提取音频 -> 调 ASR -> 生成字幕 -> 下载视频 -> 任务并发 -> 进度跟踪 -> 失败重试 -> 在线改配置」串成完整流水线，命令行和脚本很难做得顺手。VideoFlow 在不改动底层引擎的前提下，给它套上了一层 Web UI：
 
@@ -42,6 +42,7 @@
 | 去马赛克 | 手动跑 Docker 命令、盯终端 | 一键去马赛克任务，支持 CPU / CUDA / MPS / XPU |
 | 清晰度增强 | 自己找工具、参数难调 | 一键升级分辨率，Real-ESRGAN / Real-CUGAN / libplacebo 可选，处理器 / 模型 / 降噪等级按任务指定 |
 | 视频下载 | 手动找 yt-dlp / 浏览器插件，下载散落各处 | 内置下载管理，URL 提交即下，自动入库视频列表 |
+| Telegram 下载 | 得装 tdl / Telegram Desktop，命令行参数记不住 | 粘贴 t.me 链接自动识别，网页扫码登录，与普通下载共用进度与入库流程 |
 | 任务管理 | 自己记，关掉终端就没了 | 任务列表 + 实时进度 + 取消任务 + 失败重试 + 历史可查 |
 | 并发控制 | 自己写队列 / 信号量 | 调度器按类型独立并发数自动调度，运行时在线调整 |
 | 配置修改 | 改配置文件、重启服务 | 在线修改，保存即热生效，持久化到数据库 |
@@ -58,6 +59,7 @@
 | **有损坏视频的人** | 视频打不开？用 lada Docker 一键去马赛克，支持多种计算设备 |
 | **NAS / 家庭服务器玩家** | Docker 长期挂着，定时扫描目录自动入库，新视频自动生成字幕 |
 | **从网络下载视频的人** | 内置 yt-dlp 下载管理，URL 提交即下，进度实时跟踪，下载完成自动入库到视频列表 |
+| **常逛 Telegram 频道的人** | 粘贴 t.me 消息链接即下，支持私有频道与话题/评论区链接，网页扫码登录，无需额外装命令行工具 |
 | **想本地跑 Whisper 的人** | 不想写脚本，Web 界面配置 ASR 参数（语言 / VAD / 提示词）即可 |
 | **嫌命令行麻烦的人** | 全程图形界面，配置、扫描、任务进度一目了然 |
 | **本地化运行** | ffmpeg 自动智能调用本地已安装的 ffmpeg，无需额外配置 |
@@ -168,13 +170,19 @@ docker run -d --name videoflow \
   video-captions:latest
 ```
 
-Dockerfile 为多阶段构建：`golang:1.25-alpine` 编译（CGO）+ `alpine:3.20` 运行（内置 ffmpeg 和 docker-cli）。支持 `linux/amd64` 和 `linux/arm64` 双架构。
+Dockerfile 为多阶段构建：`golang:1.26-alpine` 编译（CGO，1.26 是为了满足 tdl/core 对 Go 1.25.8+ 的要求）+ `alpine:3.20` 运行（内置 ffmpeg 和 docker-cli）。
+
+基础镜像默认走华为云镜像源（国内构建更快），但该源只提供 amd64。**Apple Silicon 等 arm64 机器**建议切到官方多架构镜像，构建原生 arm64 镜像，否则整个容器会在 QEMU 模拟下运行（ffmpeg 等 CPU 密集操作会明显变慢）：
+
+```bash
+docker build --build-arg BASE_REGISTRY=docker.io/library -t video-captions:latest -f Dockerfile .
+```
 
 </details>
 
 ### 方式三：本地开发部署
 
-**前置要求：** Go 1.25+、Node.js 22.18+、FFmpeg，并已运行 [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice)。
+**前置要求：** Go 1.25.8+（Telegram 依赖的 tdl/core 要求）、Node.js 22.18+、FFmpeg，并已运行 [Whisper ASR Webservice](https://github.com/ahmetoner/whisper-asr-webservice)。
 
 ```bash
 # 后端
@@ -308,6 +316,8 @@ viper 前缀 `APP_`，配置键 `.` -> `_`，故 `http.port` 对应环境变量 
 | `APP_ASR_LANGUAGE` | `asr.language` | `zh` |
 | `APP_REPAIR_DEVICE` | `repair.device` | `cpu` |
 | `APP_UPSCALE_DEVICE` | `upscale.device` | `cpu` |
+| `APP_PROXY_URL` | `proxy.url` | `""`（直连） |
+| `APP_PROXY_USE_FOR_YTDLP` | `proxy.use_for_ytdlp` | `true` |
 | `APP_DATABASE_DSN` | `database.dsn` | `data/app.db` |
 
 </details>
@@ -318,7 +328,7 @@ viper 前缀 `APP_`，配置键 `.` -> `_`，故 `http.port` 对应环境变量 
 | 容器路径 | 用途 | 是否必需 |
 | --- | --- | --- |
 | `/app/config/config.yaml` | 配置文件（只读挂载） | ✅ 必需 |
-| `/app/data` | SQLite 数据库持久化（`data/app.db`） | ✅ 必需 |
+| `/app/data` | 数据持久化：SQLite 数据库（`data/app.db`）与 Telegram 登录会话（`data/telegram/`） | ✅ 必需 |
 | `/var/run/docker.sock` | 宿主机 Docker 套接字，用于组件安装/检测/去马赛克/清晰度增强 | ✅ 必需 |
 | `/<容器内视频目录>` | 将宿主机视频目录挂载到容器内（如 `/videos`），然后在配置中将 `video.dir` 设为该路径 | ✅ 必需 |
 | `/<容器内输出目录>` | 任务输出目录（如 `/output`，**必须可写**），然后在配置中将 `output.dir` 设为该路径 | ✅ 必需（Docker 部署） |
@@ -469,30 +479,38 @@ viper 前缀 `APP_`，配置键 `.` -> `_`，故 `http.port` 对应环境变量 
 	│   ├── config/               # 配置文件（config.yaml.local 为模板）
 	│   ├── internal/
 	│   │   ├── controller/       # HTTP 控制器
-	│   │   ├── logic/            # 业务逻辑
+	│   │   ├── logic/            # 业务逻辑（下载/任务/设置/认证 等）
 	│   │   ├── model/            # 数据模型与持久化（GORM）
 	│   │   ├── dto/              # 请求/响应 DTO
 	│   │   ├── router/           # 路由注册
+	│   │   ├── middleware/       # JWT 鉴权中间件
+	│   │   ├── telegram/         # Telegram 下载（基于 tdl core：登录/链接解析/下载）
+	│   │   ├── component/        # 组件检测与安装（Docker / FFmpeg / ASR / yt-dlp 等）
 	│   │   ├── asr/              # ASR 客户端
 	│   │   ├── ffmpeg/           # FFmpeg 本地执行器
 	│   │   ├── repair/           # 去马赛克执行器
 	│   │   ├── upscale/          # 清晰度增强执行器
 	│   │   ├── subtitle/         # 字幕解析
 	│   │   ├── scanner/          # 视频目录扫描器
-	│   │   └── scheduler/        # 任务调度器
+	│   │   ├── scheduler/        # 任务调度器
+	│   │   └── utils/            # 内部工具
 	│   ├── enum/                 # 业务错误码
 	│   └── utils/                # 日志、响应封装
 	├── frontend/
 	│   ├── src/
 	│   │   ├── api/              # 接口请求封装
-	│   │   ├── views/            # 页面（视频/任务/设置/下载）
-	│   │   ├── components/       # 通用组件（VfListPanel）
+	│   │   ├── views/            # 页面（视频/任务/设置/下载/登录 等）
+	│   │   ├── components/       # 通用组件（列表面板、登录弹窗、各类对话框）
 	│   │   ├── composables/      # 响应式等组合式函数
 	│   │   ├── stores/           # Pinia 状态
 	│   │   ├── router/           # 路由
+	│   │   ├── locales/          # 四语言文案
 	│   │   └── utils/            # 工具函数
-	│   └── vite.config.ts        # 含 /api 代理配置
-	├── Dockerfile                # 多阶段构建
+	│   └── vite.config.ts        # 含 /api 代理配置（端口读 APP_HTTP_PORT）
+	├── docker-compose.yml        # 部署模板（需按注释修改挂载路径）
+	├── nginx.conf                # 容器内前端静态服务 + /api 反向代理
+	├── entrypoint.sh             # 容器启动脚本（后端 + nginx，含信号转发）
+	├── Dockerfile                # 多阶段构建（BASE_REGISTRY 可切换基础镜像源）
 	└── LICENSE
 ```
 
@@ -602,6 +620,8 @@ viper 前缀 `APP_`，配置键 `.` -> `_`，故 `http.port` 对应环境变量 
 **✅ 已实现**
 
 - 视频下载（yt-dlp 内置管理，支持 YouTube / Bilibili / Twitter / 抖音 / Twitch 等主流平台，进度实时跟踪，自动入库）
+- Telegram 下载（内置 MTProto 客户端，粘贴 t.me 链接自动识别，支持私有频道 / 话题 / 评论区链接，网页扫码登录，与普通下载共用进度与入库流程）
+- 全局出站代理（Telegram 与 yt-dlp 共用，yt-dlp 可单独开关，支持 socks5 / socks5h / http / https）
 - 视频扫描（手动 / 定时自动）+ 字幕生成（Whisper ASR）
 - 字幕写入视频（烧录），三级字幕查找机制（已完成记录 → 输出目录 SRT → 自动生成）
 - 去马赛克（lada）+ 清晰度增强（Video2X，支持处理器 / 模型 / 降噪等级按任务指定）
@@ -609,7 +629,7 @@ viper 前缀 `APP_`，配置键 `.` -> `_`，故 `http.port` 对应环境变量 
 - 任务管理（创建 / 取消 / 失败重试 / 批量删除 + 删除输出文件 / 实时进度）
 - 任务调度器（按类型独立并发控制 / 轮询间隔可配置 / 运行时调整）
 - 运行时配置在线修改 + 持久化（SQLite），覆盖 ASR / 去马赛克 / 清晰度增强 / 各类并发数 / 轮询间隔
-- 组件管理（检测与安装：Docker / FFmpeg / Whisper ASR / lada / Video2X / yt-dlp，SSE 进度推送，安装历史追溯）
+- 组件管理（检测与安装：Docker / FFmpeg / Whisper ASR / lada / Video2X / yt-dlp，SSE 进度推送，安装历史追溯；Telegram 为内置客户端，仅检测登录状态）
 - 用户认证（登录 / 初始化 / 修改密码 / 密码重置）
 - Docker 部署 + 端口运行时指定 + 多架构镜像（amd64 + arm64 原生支持）
 - FFmpeg 智能本地调用

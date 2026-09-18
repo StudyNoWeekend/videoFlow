@@ -90,5 +90,9 @@ func autoMigrate(ctx context.Context, db *gorm.DB) error {
 	); err != nil {
 		return err
 	}
+	// AutoMigrate 不会更新既有索引定义，历史库的 path 普通唯一索引需在此重建为部分索引
+	if err := model.MigrateVideoPathIndex(ctx, db); err != nil {
+		return err
+	}
 	return model.MigrateTaskType(ctx, db)
 }

@@ -9,12 +9,17 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+
+	"video-captions/utils/logger"
 )
 
 // Video 视频数据模型
 type Video struct {
 	BaseModel
-	Path     string `gorm:"type:varchar(1024);not null;uniqueIndex:idx_video_path;comment:视频文件绝对路径" json:"path"`
+	// path 的唯一索引是部分索引（仅约束未软删除的行），与软删除过滤语义保持一致。
+	// 若索引不限定 deleted_at IS NULL，软删除行会一直占着 path 占位，
+	// 同一文件重新入库时就会报 UNIQUE constraint failed: videos.path。
+	Path     string `gorm:"type:varchar(1024);not null;uniqueIndex:idx_video_path,where:deleted_at IS NULL;comment:视频文件绝对路径" json:"path"`
 	Name     string `gorm:"type:varchar(255);not null;comment:视频文件名" json:"name"`
 	Width    int    `gorm:"default:0;comment:视频宽度（像素）" json:"width"`
 	Height   int    `gorm:"default:0;comment:视频高度（像素）" json:"height"`
@@ -37,6 +42,34 @@ func (Video) TableName() string {
 func (v *Video) BeforeCreate(tx *gorm.DB) error {
 	if v.ID == "" {
 		v.ID = uuid.NewString()
+	}
+	return nil
+}
+
+// MigrateVideoPathIndex 把 videos.path 的唯一索引重建为部分索引（仅约束未软删除的行）。
+// AutoMigrate 只按索引名判断索引是否存在、不比较索引定义，因此历史库里的普通唯一索引
+// 不会被自动更新，需要显式重建一次：旧索引会让软删除行永久占用 path。
+// 幂等：索引不存在或已是部分索引时直接返回。
+func MigrateVideoPathIndex(ctx context.Context, db *gorm.DB) error {
+	var indexSQL string
+	if err := db.WithContext(ctx).
+		Raw("SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'videos' AND name = 'idx_video_path'").
+		Scan(&indexSQL).Error; err != nil {
+		return fmt.Errorf("查询视频路径索引失败: %w", err)
+	}
+	if indexSQL == "" || strings.Contains(strings.ToUpper(indexSQL), "WHERE") {
+		return nil
+	}
+
+	migrator := db.WithContext(ctx).Migrator()
+	if err := migrator.DropIndex(&Video{}, "idx_video_path"); err != nil {
+		return fmt.Errorf("删除旧视频路径唯一索引失败: %w", err)
+	}
+	if err := migrator.CreateIndex(&Video{}, "idx_video_path"); err != nil {
+		return fmt.Errorf("重建视频路径部分索引失败: %w", err)
+	}
+	if logger.Logger != nil {
+		logger.Logger.Info("视频路径唯一索引已重建为部分索引（仅约束未软删除的行）")
 	}
 	return nil
 }
@@ -97,35 +130,43 @@ func VideoUpsertByPath(ctx context.Context, path string, size int64, duration in
 	}
 
 	now := time.Now().Unix()
-	if video != nil {
-		// 更新已有记录
-		video.Name = name
-		video.Size = size
-		video.Duration = duration
-		video.Width = width
-		video.Height = height
-		video.UpdatedAt = now
-		if err := DB.WithContext(ctx).Save(video).Error; err != nil {
-			return nil, fmt.Errorf("更新视频记录失败: %w", err)
+	if video == nil {
+		// 创建新记录
+		video = &Video{
+			BaseModel: BaseModel{
+				CreatedAt: now,
+				UpdatedAt: now,
+			},
+			Path:     path,
+			Name:     name,
+			Size:     size,
+			Duration: duration,
+			Width:    width,
+			Height:   height,
 		}
-		return video, nil
+		if err := VideoCreate(ctx, video); err != nil {
+			// 自动扫描、手动扫描、下载完成回写可能并发入库同一路径，
+			// 抢先写入的一方胜出，这里重读后按“更新已有记录”处理；
+			// 仍读不到（真实写入错误）才返回原始错误。
+			existing, getErr := VideoGetByPath(ctx, path)
+			if getErr != nil || existing == nil {
+				return nil, fmt.Errorf("创建视频记录失败: %w", err)
+			}
+			video = existing
+		} else {
+			return video, nil
+		}
 	}
 
-	// 创建新记录
-	video = &Video{
-		BaseModel: BaseModel{
-			CreatedAt: now,
-			UpdatedAt: now,
-		},
-		Path:     path,
-		Name:     name,
-		Size:     size,
-		Duration: duration,
-		Width:    width,
-		Height:   height,
-	}
-	if err := VideoCreate(ctx, video); err != nil {
-		return nil, fmt.Errorf("创建视频记录失败: %w", err)
+	// 更新已有记录
+	video.Name = name
+	video.Size = size
+	video.Duration = duration
+	video.Width = width
+	video.Height = height
+	video.UpdatedAt = now
+	if err := DB.WithContext(ctx).Save(video).Error; err != nil {
+		return nil, fmt.Errorf("更新视频记录失败: %w", err)
 	}
 	return video, nil
 }
@@ -224,8 +265,8 @@ func VideoUpdate(ctx context.Context, id string, name string) (*Video, error) {
 }
 
 // VideoDelete 根据 ID 删除视频记录（软删除）。
-// videos.path 上有唯一索引，软删除行仍占据索引位，会阻止同一文件重新扫描入库；
-// 因此删除成功后同步改写 path 释放占位（幂等：仅 RowsAffected>0 的那次删除会执行）。
+// path 的唯一索引是部分索引（仅约束未软删除的行），软删除后同一文件可以重新入库，
+// 因此无需再改写 path 释放占位。
 func VideoDelete(ctx context.Context, id string) error {
 	result := DB.WithContext(ctx).Delete(&Video{}, "id = ?", id)
 	if result.Error != nil {
@@ -233,11 +274,6 @@ func VideoDelete(ctx context.Context, id string) error {
 	}
 	if result.RowsAffected == 0 {
 		return gorm.ErrRecordNotFound
-	}
-	if err := DB.WithContext(ctx).Unscoped().Model(&Video{}).
-		Where("id = ?", id).
-		Update("path", gorm.Expr("path || ':deleted:' || id")).Error; err != nil {
-		return fmt.Errorf("释放视频路径唯一索引占位失败: %w", err)
 	}
 	return nil
 }
